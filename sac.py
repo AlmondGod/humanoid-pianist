@@ -5,7 +5,6 @@ from typing import Any, Dict, Optional, Sequence
 
 import flax.linen as nn
 import jax
-jax.config.update('jax_platform_name', 'METAL')
 import jax.numpy as jnp
 import numpy as np
 import optax

@@ -2,7 +2,6 @@ from typing import Any, Callable, Optional, Sequence, TypeAlias
 
 import flax.linen as nn
 import jax
-jax.config.update('jax_platform_name', 'METAL')
 import jax.numpy as jnp
 
 Params = Any

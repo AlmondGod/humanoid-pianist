@@ -2,7 +2,6 @@ from dataclasses import dataclass
 
 import dm_env
 import jax
-jax.config.update('jax_platform_name', 'METAL')
 import jax.numpy as jnp
 import numpy as np
 from dm_env import specs

@@ -1,7 +1,7 @@
 #!/bin/bash
 
-WANDB_DIR=/tmp/robopianist/ MUJOCO_GL=glfw XLA_PYTHON_CLIENT_PREALLOCATE=false python train.py \
-    --root-dir /tmp/robopianist/rl/ \
+WANDB_DIR=/root/robopianist-rl/ MUJOCO_GL=egl XLA_PYTHON_CLIENT_PREALLOCATE=false python train.py \
+    --root-dir /root/robopianist-rl/models/\
     --warmstart-steps 5000 \
     --max-steps 5000000 \
     --discount 0.8 \

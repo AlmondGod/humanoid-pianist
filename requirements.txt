@@ -4,3 +4,4 @@ dm_env_wrappers
 flax
 optax
 distrax
+numpy<2.0.0

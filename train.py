@@ -20,7 +20,7 @@ import robopianist.wrappers as robopianist_wrappers
 
 @dataclass(frozen=True)
 class Args:
-    root_dir: str = "/Users/almondgod/Repositories/robopianist/robopianist-rl/models/"
+    root_dir: str = "/root/robopianist-rl/train.py/models"
     seed: int = 42
     max_steps: int = 1_000_000
     warmstart_steps: int = 5_000
