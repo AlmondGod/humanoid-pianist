@@ -90,15 +90,7 @@ class SAC(struct.PyTreeNode):
     ) -> "SAC":
         """Initializes the agent from the given environment spec and config."""
 
-        print("\nDEBUG SAC Initialize:")
-        print(f"Spec observation type: {type(spec.observation)}")
-        print(f"Spec observation structure: {jax.tree_map(lambda x: x.shape, spec.observation)}")
-        print(f"Spec action type: {type(spec.action)}")
-        print(f"Spec action structure: {jax.tree_map(lambda x: x.shape, spec.action)}")
-
         observations = zeros_like(spec.observation)
-        print(f"Observations type: {type(observations)}")
-        print(f"Observations structure: {jax.tree_map(lambda x: x.shape, observations)}")
 
         action_dim = spec.action.shape[-1]
         actions = zeros_like(spec.action)

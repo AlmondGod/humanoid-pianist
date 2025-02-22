@@ -8,7 +8,6 @@ from robopianist.wrappers import PianoSoundVideoWrapper
 from dm_env_wrappers import CanonicalSpecWrapper
 from robopianist.suite.tasks.piano_with_shadow_hands import PianoWithShadowHands
 from mujoco_utils import composer_utils
-from data_processing.add_fingering_to_midi import add_fingering_from_annotation_file
 
 import sac
 import specs
@@ -48,7 +47,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint_path", type=str, 
                       help="Path to the checkpoint file (e.g., checkpoint_0010000.pkl)",
-                      default="/tmp/robopianist/twinkle-twinkle-no-fingering/SAC-RoboPianist-debug-TwinkleTwinkleRousseau-v0-42-1740200082.8604171")
+                      default="/tmp/robopianist/rl/checkpoint_0710000.pkl")
     parser.add_argument("--environment_name", type=str,
                       default="RoboPianist-debug-TwinkleTwinkleRousseau-v0",
                       help="Environment name from robopianist.music.DEBUG_MIDIS")

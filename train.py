@@ -20,19 +20,19 @@ import robopianist.wrappers as robopianist_wrappers
 
 @dataclass(frozen=True)
 class Args:
-    root_dir: str = "/tmp/robopianist/twinkle-twinkle-no-fingering"
+    root_dir: str = "/Users/almondgod/Repositories/robopianist/robopianist-rl/models/"
     seed: int = 42
     max_steps: int = 1_000_000
     warmstart_steps: int = 5_000
-    log_interval: int = 1
-    eval_interval: int = 1
+    log_interval: int = 10
+    eval_interval: int = 10000
     eval_episodes: int = 1
-    batch_size: int = 4
+    batch_size: int = 256
     discount: float = 0.99
-    tqdm_bar: bool = False
+    tqdm_bar: bool = True
     replay_capacity: int = 1_000_000
     project: str = "robopianist"
-    entity: str = ""
+    entity: str = "almond-maj-projects"
     name: str = ""
     tags: str = ""
     notes: str = ""
@@ -120,15 +120,20 @@ def main(args: Args) -> None:
     if args.name:
         run_name = args.name
     else:
-        run_name = f"SAC-{args.environment_name}-{args.seed}-{time.time()}"
+        run_name = f"SAC-{args.environment_name}-{args.seed}-{time.strftime('%Y-%m-%d-%H-%M-%S')}"
+
+    print(f"\nStarting training run: {run_name}")
+    print(f"Saving to directory: {args.root_dir}")
 
     # Create experiment directory.
     experiment_dir = Path(args.root_dir) / run_name
     experiment_dir.mkdir(parents=True)
+    print(f"Created experiment directory: {experiment_dir}")
 
     # Seed RNGs.
     random.seed(args.seed)
     np.random.seed(args.seed)
+    print(f"Set random seeds to: {args.seed}")
 
     wandb.init(
         project=args.project,
@@ -167,7 +172,11 @@ def main(args: Args) -> None:
         # Act.
         if i < args.warmstart_steps:
             action = spec.sample_action(random_state=env.random_state)
+            if i == 1:
+                print("Taking random actions for warmstart...")
         else:
+            if i == args.warmstart_steps:
+                print("\nWarmstart complete, starting training...")
             agent, action = agent.sample_actions(timestep.observation)
 
         # Observe.
@@ -199,7 +208,8 @@ def main(args: Args) -> None:
             wandb.log(log_dict | music_dict, step=i)
             video = wandb.Video(str(eval_env.latest_filename), fps=4, format="mp4")
             wandb.log({"video": video, "global_step": i})
-            eval_env.latest_filename.unlink()
+            print(f"Metrics: {metrics}")
+            # eval_env.latest_filename.unlink()
 
             # Save checkpoint
             checkpoint = {
