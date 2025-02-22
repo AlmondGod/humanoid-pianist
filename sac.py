@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional, Sequence
 
 import flax.linen as nn
 import jax
+jax.config.update('jax_platform_name', 'METAL')
 import jax.numpy as jnp
 import numpy as np
 import optax
@@ -89,8 +90,17 @@ class SAC(struct.PyTreeNode):
     ) -> "SAC":
         """Initializes the agent from the given environment spec and config."""
 
-        action_dim = spec.action.shape[-1]
+        print("\nDEBUG SAC Initialize:")
+        print(f"Spec observation type: {type(spec.observation)}")
+        print(f"Spec observation structure: {jax.tree_map(lambda x: x.shape, spec.observation)}")
+        print(f"Spec action type: {type(spec.action)}")
+        print(f"Spec action structure: {jax.tree_map(lambda x: x.shape, spec.action)}")
+
         observations = zeros_like(spec.observation)
+        print(f"Observations type: {type(observations)}")
+        print(f"Observations structure: {jax.tree_map(lambda x: x.shape, observations)}")
+
+        action_dim = spec.action.shape[-1]
         actions = zeros_like(spec.action)
 
         target_entropy = config.target_entropy or -0.5 * action_dim

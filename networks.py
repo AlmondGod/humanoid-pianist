@@ -2,10 +2,11 @@ from typing import Any, Callable, Optional, Sequence, TypeAlias
 
 import flax.linen as nn
 import jax
+jax.config.update('jax_platform_name', 'METAL')
 import jax.numpy as jnp
 
 Params = Any
-PRNGKey: TypeAlias = jax.random.KeyArray
+PRNGKey: TypeAlias = Any
 
 default_init = nn.initializers.xavier_uniform
 
@@ -19,6 +20,11 @@ class MLP(nn.Module):
 
     @nn.compact
     def __call__(self, x: jnp.ndarray, training: bool = False) -> jnp.ndarray:
+        
+        # Flatten dictionary into single array
+        if isinstance(x, dict):
+            x = jnp.concatenate([x[k].flatten() for k in sorted(x.keys())])
+        
         for i, size in enumerate(self.hidden_dims):
             x = nn.Dense(size, kernel_init=default_init())(x)
 
@@ -36,10 +42,18 @@ class MLP(nn.Module):
 class StateActionValue(nn.Module):
     base_cls: nn.Module | Callable[..., nn.Module]
 
+    def _flatten_dict_obs(self, x):
+        if isinstance(x, dict):
+            return jnp.concatenate([x[k].flatten() for k in sorted(x.keys())])
+        return x
+
     @nn.compact
     def __call__(
         self, observations: jnp.ndarray, actions: jnp.ndarray, *args, **kwargs
     ) -> jnp.ndarray:
+        # Flatten observations if it's a dict
+        observations = self._flatten_dict_obs(observations)
+        
         inputs = jnp.concatenate([observations, actions], axis=-1)
         outputs = self.base_cls()(inputs, *args, **kwargs)
 

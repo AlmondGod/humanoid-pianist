@@ -7,6 +7,7 @@ import time
 import random
 import numpy as np
 from tqdm import tqdm
+import pickle
 
 import sac
 import specs
@@ -19,14 +20,14 @@ import robopianist.wrappers as robopianist_wrappers
 
 @dataclass(frozen=True)
 class Args:
-    root_dir: str = "/tmp/robopianist"
+    root_dir: str = "/tmp/robopianist/twinkle-twinkle-no-fingering"
     seed: int = 42
     max_steps: int = 1_000_000
     warmstart_steps: int = 5_000
-    log_interval: int = 1_000
-    eval_interval: int = 10_000
+    log_interval: int = 1
+    eval_interval: int = 1
     eval_episodes: int = 1
-    batch_size: int = 256
+    batch_size: int = 4
     discount: float = 0.99
     tqdm_bar: bool = False
     replay_capacity: int = 1_000_000
@@ -52,7 +53,7 @@ class Args:
     primitive_fingertip_collisions: bool = False
     frame_stack: int = 1
     clip: bool = True
-    record_dir: Optional[Path] = None
+    record_dir: Optional[Path] = Path("/tmp/robopianist/twinkle-twinkle-no-fingering/videos")
     record_every: int = 1
     record_resolution: Tuple[int, int] = (480, 640)
     camera_id: Optional[str | int] = "piano/back"
@@ -199,6 +200,18 @@ def main(args: Args) -> None:
             video = wandb.Video(str(eval_env.latest_filename), fps=4, format="mp4")
             wandb.log({"video": video, "global_step": i})
             eval_env.latest_filename.unlink()
+
+            # Save checkpoint
+            checkpoint = {
+                'params': agent.actor.params,
+                'critic_params': agent.critic.params,
+                'target_critic_params': agent.target_critic.params,
+                'temp_params': agent.temp.params
+            }
+            checkpoint_path = experiment_dir / f"checkpoint_{i:08d}.pkl"
+            with open(checkpoint_path, 'wb') as f:
+                pickle.dump(checkpoint, f)
+            print(f"Saved checkpoint to {checkpoint_path}")
 
         if i % args.log_interval == 0:
             wandb.log({"train/fps": int(i / (time.time() - start_time))}, step=i)
