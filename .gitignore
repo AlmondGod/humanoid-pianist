@@ -1,0 +1,4 @@
+models/*
+videos/*
+wandb/*
+__pycache__/*
