@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Literal
 import tyro
 from dataclasses import dataclass, asdict
 import wandb
@@ -12,6 +12,7 @@ import pickle
 import sac
 import specs
 import replay
+from hybrid_grpo import HybridGRPO  # Import only
 
 from robopianist import suite
 import dm_env_wrappers as wrappers
@@ -20,12 +21,12 @@ import robopianist.wrappers as robopianist_wrappers
 
 @dataclass(frozen=True)
 class Args:
-    root_dir: str = "/Users/almondgod/Repositories/robopianist/robopianist-rl/models/"
+    root_dir: str = "remember to use run.sh"
     seed: int = 42
     max_steps: int = 1_000_000
     warmstart_steps: int = 5_000
-    log_interval: int = 10
-    eval_interval: int = 10000
+    log_interval: int = 100000
+    eval_interval: int = 40000
     eval_episodes: int = 1
     batch_size: int = 256
     discount: float = 0.99
@@ -37,7 +38,9 @@ class Args:
     tags: str = ""
     notes: str = ""
     mode: str = "disabled"
-    environment_name: str = "RoboPianist-debug-TwinkleTwinkleRousseau-v0"
+    # environment_name: str = "RoboPianist-debug-TwinkleTwinkleRousseau-v0"
+    midi_file: Optional[Path] = None
+    load_checkpoint: Optional[Path] = None  # Path to checkpoint file for resuming training
     n_steps_lookahead: int = 10
     trim_silence: bool = False
     gravity_compensation: bool = False
@@ -46,7 +49,7 @@ class Args:
     stretch_factor: float = 1.0
     shift_factor: int = 0
     wrong_press_termination: bool = False
-    disable_fingering_reward: bool = False
+    disable_fingering_reward: bool = True
     disable_forearm_reward: bool = False
     disable_colorization: bool = False
     disable_hand_collisions: bool = False
@@ -59,6 +62,14 @@ class Args:
     camera_id: Optional[str | int] = "piano/back"
     action_reward_observation: bool = False
     agent_config: sac.SACConfig = sac.SACConfig()
+    algorithm: Literal["sac", "hybrid_grpo"] = "sac"
+    # Hybrid GRPO parameters
+    num_samples: int = 8
+    clip_param: float = 0.2
+    value_coef: float = 0.5
+    entropy_coef: float = 0.01
+    max_workers: int = 4  # Maximum number of parallel evaluation threads
+    mini_batch_size: int = 16  # Maximum states to process in a single mini-batch
 
 
 def prefix_dict(prefix: str, d: dict) -> dict:
@@ -67,7 +78,9 @@ def prefix_dict(prefix: str, d: dict) -> dict:
 
 def get_env(args: Args, record_dir: Optional[Path] = None):
     env = suite.load(
-        environment_name=args.environment_name,
+        environment_name="crossing-field-cut-10s",
+        # environment_name=args.environment_name,
+        midi_file=args.midi_file,
         seed=args.seed,
         stretch=args.stretch_factor,
         shift=args.shift_factor,
@@ -120,7 +133,7 @@ def main(args: Args) -> None:
     if args.name:
         run_name = args.name
     else:
-        run_name = f"SAC-{args.environment_name}-{args.seed}-{time.strftime('%Y-%m-%d-%H-%M-%S')}"
+        run_name = f"{args.algorithm.upper()}-{args.midi_file}-{args.seed}-{time.strftime('%Y-%m-%d-%H-%M-%S')}"
 
     print(f"\nStarting training run: {run_name}")
     print(f"Saving to directory: {args.root_dir}")
@@ -150,13 +163,60 @@ def main(args: Args) -> None:
 
     spec = specs.EnvironmentSpec.make(env)
 
-    agent = sac.SAC.initialize(
-        spec=spec,
-        config=args.agent_config,
-        seed=args.seed,
-        discount=args.discount,
-    )
-
+    # Initialize agent based on algorithm choice
+    if args.algorithm == "sac":
+        print("Using SAC")
+        agent = sac.SAC.initialize(
+            spec=spec,
+            config=args.agent_config,
+            seed=args.seed,
+            discount=args.discount,
+        )
+    else:  # hybrid_grpo
+        print("Using Hybrid GRPO with state restoration for multi-action evaluation")
+        agent = HybridGRPO(
+            state_dim=spec.observation_dim,
+            action_dim=spec.action_dim,
+            hidden_dims=args.agent_config.hidden_dims,
+            lr=args.agent_config.actor_lr,
+            gamma=args.discount,
+            num_samples=args.num_samples,
+            clip_param=args.clip_param,
+            value_coef=args.value_coef,
+            entropy_coef=args.entropy_coef,
+            max_workers=args.max_workers,
+            mini_batch_size=args.mini_batch_size,
+        )
+        agent.set_env(env)  # Pass environment instance for state restoration
+    
+    # Load checkpoint if provided
+    if args.load_checkpoint:
+        checkpoint_path = args.load_checkpoint
+        print(f"Loading checkpoint from {checkpoint_path}")
+        try:
+            with open(checkpoint_path, 'rb') as f:
+                checkpoint = pickle.load(f)
+            
+            if args.algorithm == "hybrid_grpo":
+                # Load PyTorch checkpoint
+                agent.actor.load_state_dict(checkpoint['actor_state_dict'])
+                agent.critic.load_state_dict(checkpoint['critic_state_dict'])
+                agent.actor_optimizer.load_state_dict(checkpoint['actor_optimizer_state_dict'])
+                agent.critic_optimizer.load_state_dict(checkpoint['critic_optimizer_state_dict'])
+                print("Successfully loaded PyTorch checkpoint")
+            else:
+                # Load JAX checkpoint
+                agent = agent.replace(
+                    actor=agent.actor.replace(params=checkpoint['params']),
+                    critic=agent.critic.replace(params=checkpoint['critic_params']),
+                    target_critic=agent.target_critic.replace(params=checkpoint['target_critic_params']),
+                    temp=agent.temp.replace(params=checkpoint['temp_params'])
+                )
+                print("Successfully loaded JAX checkpoint")
+        except Exception as e:
+            print(f"Error loading checkpoint: {e}")
+            print("Starting with a fresh model")
+    
     replay_buffer = replay.Buffer(
         state_dim=spec.observation_dim,
         action_dim=spec.action_dim,
@@ -196,6 +256,7 @@ def main(args: Args) -> None:
                 agent, metrics = agent.update(transitions)
                 if i % args.log_interval == 0:
                     wandb.log(prefix_dict("train", metrics), step=i)
+                    # print(f"Training metrics: {metrics}")
 
         # Eval.
         if i % args.eval_interval == 0:
@@ -208,16 +269,26 @@ def main(args: Args) -> None:
             wandb.log(log_dict | music_dict, step=i)
             video = wandb.Video(str(eval_env.latest_filename), fps=4, format="mp4")
             wandb.log({"video": video, "global_step": i})
-            print(f"Metrics: {metrics}")
             # eval_env.latest_filename.unlink()
 
             # Save checkpoint
-            checkpoint = {
-                'params': agent.actor.params,
-                'critic_params': agent.critic.params,
-                'target_critic_params': agent.target_critic.params,
-                'temp_params': agent.temp.params
-            }
+            if args.algorithm == "hybrid_grpo":
+                # PyTorch checkpoint format
+                checkpoint = {
+                    'actor_state_dict': agent.actor.state_dict(),
+                    'critic_state_dict': agent.critic.state_dict(),
+                    'actor_optimizer_state_dict': agent.actor_optimizer.state_dict(),
+                    'critic_optimizer_state_dict': agent.critic_optimizer.state_dict(),
+                }
+            else:
+                # JAX checkpoint format (SAC)
+                checkpoint = {
+                    'params': agent.actor.params,
+                    'critic_params': agent.critic.params,
+                    'target_critic_params': agent.target_critic.params,
+                    'temp_params': agent.temp.params
+                }
+            
             checkpoint_path = experiment_dir / f"checkpoint_{i:08d}.pkl"
             with open(checkpoint_path, 'wb') as f:
                 pickle.dump(checkpoint, f)
