@@ -13,6 +13,7 @@ import sac
 import specs
 import replay
 from hybrid_grpo import HybridGRPO  # Import only
+from qtopt import QTOpt, QTOptConfig  # Add QTOpt import
 
 from robopianist import suite
 import dm_env_wrappers as wrappers
@@ -37,7 +38,7 @@ class Args:
     name: str = ""
     tags: str = ""
     notes: str = ""
-    mode: str = "disabled"
+    mode: str = "online"
     # environment_name: str = "RoboPianist-debug-TwinkleTwinkleRousseau-v0"
     midi_file: Optional[Path] = None
     load_checkpoint: Optional[Path] = None  # Path to checkpoint file for resuming training
@@ -62,14 +63,19 @@ class Args:
     camera_id: Optional[str | int] = "piano/back"
     action_reward_observation: bool = False
     agent_config: sac.SACConfig = sac.SACConfig()
-    algorithm: Literal["sac", "hybrid_grpo"] = "sac"
-    # Hybrid GRPO parameters
+    algorithm: Literal["sac", "hybrid_grpo", "qtopt"] = "sac"  # Add QTOpt option
+    # Minimal GRPO args needed for initialization
     num_samples: int = 8
     clip_param: float = 0.2
     value_coef: float = 0.5
     entropy_coef: float = 0.01
     max_workers: int = 4  # Maximum number of parallel evaluation threads
     mini_batch_size: int = 16  # Maximum states to process in a single mini-batch
+    # QTOpt specific parameters
+    qtopt_config: QTOptConfig = QTOptConfig()  # Add QTOpt config
+    cem_iterations: int = 3  # Number of CEM iterations for action optimization
+    cem_population_size: int = 64  # Population size for CEM
+    cem_elite_fraction: float = 0.1  # Fraction of elites to keep in CEM
 
 
 def prefix_dict(prefix: str, d: dict) -> dict:
@@ -140,7 +146,7 @@ def main(args: Args) -> None:
 
     # Create experiment directory.
     experiment_dir = Path(args.root_dir) / run_name
-    experiment_dir.mkdir(parents=True)
+    experiment_dir.mkdir(parents=True, exist_ok=True)
     print(f"Created experiment directory: {experiment_dir}")
 
     # Seed RNGs.
@@ -169,6 +175,26 @@ def main(args: Args) -> None:
         agent = sac.SAC.initialize(
             spec=spec,
             config=args.agent_config,
+            seed=args.seed,
+            discount=args.discount,
+        )
+    elif args.algorithm == "qtopt":
+        print("Using QT-Opt with Cross-Entropy Method action optimization")
+        # Update QTOpt config with command line parameters if provided
+        qtopt_config = args.qtopt_config
+        # Override QTOpt config with args if specified
+        if args.cem_iterations != QTOptConfig().cem_iterations:
+            qtopt_config = qtopt_config.replace(cem_iterations=args.cem_iterations)
+        if args.cem_population_size != QTOptConfig().cem_population_size:
+            qtopt_config = qtopt_config.replace(cem_population_size=args.cem_population_size)
+        if args.cem_elite_fraction != QTOptConfig().cem_elite_fraction:
+            qtopt_config = qtopt_config.replace(cem_elite_fraction=args.cem_elite_fraction)
+        # Use the same hidden dimensions from agent_config for consistency
+        qtopt_config = qtopt_config.replace(hidden_dims=args.agent_config.hidden_dims)
+            
+        agent = QTOpt.initialize(
+            spec=spec,
+            config=qtopt_config,
             seed=args.seed,
             discount=args.discount,
         )
@@ -204,15 +230,22 @@ def main(args: Args) -> None:
                 agent.actor_optimizer.load_state_dict(checkpoint['actor_optimizer_state_dict'])
                 agent.critic_optimizer.load_state_dict(checkpoint['critic_optimizer_state_dict'])
                 print("Successfully loaded PyTorch checkpoint")
+            elif args.algorithm == "qtopt":
+                # JAX checkpoint format for QTOpt (no actor or temp)
+                agent = agent.replace(
+                    critic=agent.critic.replace(params=checkpoint.get('critic_params', checkpoint.get('params'))),
+                    target_critic=agent.target_critic.replace(params=checkpoint.get('target_critic_params', checkpoint.get('params')))
+                )
+                print(f"Successfully loaded JAX checkpoint for {args.algorithm}")
             else:
-                # Load JAX checkpoint
+                # Load JAX checkpoint (for SAC or QTOpt)
                 agent = agent.replace(
                     actor=agent.actor.replace(params=checkpoint['params']),
                     critic=agent.critic.replace(params=checkpoint['critic_params']),
                     target_critic=agent.target_critic.replace(params=checkpoint['target_critic_params']),
                     temp=agent.temp.replace(params=checkpoint['temp_params'])
                 )
-                print("Successfully loaded JAX checkpoint")
+                print(f"Successfully loaded JAX checkpoint for {args.algorithm}")
         except Exception as e:
             print(f"Error loading checkpoint: {e}")
             print("Starting with a fresh model")
@@ -279,6 +312,12 @@ def main(args: Args) -> None:
                     'critic_state_dict': agent.critic.state_dict(),
                     'actor_optimizer_state_dict': agent.actor_optimizer.state_dict(),
                     'critic_optimizer_state_dict': agent.critic_optimizer.state_dict(),
+                }
+            elif args.algorithm == "qtopt":
+                # JAX checkpoint format for QTOpt (no actor or temp)
+                checkpoint = {
+                    'critic_params': agent.critic.params,
+                    'target_critic_params': agent.target_critic.params
                 }
             else:
                 # JAX checkpoint format (SAC)
