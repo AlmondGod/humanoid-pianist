@@ -267,44 +267,53 @@ def add_unitree_g1_to_env(env, position, model_path=None):
         # 2. In a user's home directory
         # 3. In a standard system location
         potential_paths = [
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "mujoco_menagerie", "unitree_g1", "g1.xml"),  # Repository root
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "mujoco_menagerie", "unitree_g1", "g1.xml"),  # Current directory
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "mujoco_menagerie", "unitree_g1", "g1_modified.xml"),  # Modified G1 model in the script directory
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "mujoco_menagerie", "unitree_g1", "g1_modified.xml"),  # Repository root with modified model
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "mujoco_menagerie", "unitree_g1", "g1.xml"),  # Original model in script directory
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "mujoco_menagerie", "unitree_g1", "g1.xml"),  # Repository root with original model
+            os.path.expanduser("~/mujoco_menagerie/unitree_g1/g1_modified.xml"),  # Modified model in user's home directory
             os.path.expanduser("~/mujoco_menagerie/unitree_g1/g1.xml"),  # User's home directory
+            "/usr/local/share/mujoco_menagerie/unitree_g1/g1_modified.xml",  # System location with modified model
+            "/usr/local/share/mujoco_menagerie/unitree_g1/g1.xml",  # System location
         ]
         
+        # Try each potential path
         for path in potential_paths:
             if os.path.exists(path):
                 model_path = path
-                print(f"Found G1 model at: {model_path}")
+                if "g1_modified.xml" in path:
+                    print(f"Found modified G1 model (without hands) at {path}")
+                else:
+                    print(f"Found G1 model at {path}")
                 break
-    
-    # Check if the file exists
-    if model_path is None or not os.path.exists(model_path):
-        print(f"Warning: G1 model file not found. Checked paths: {', '.join(potential_paths)}")
-        print("\nTo properly integrate the Unitree G1 model, please:")
-        print("1. Clone the MuJoCo Menagerie repository:")
-        print("   git clone https://github.com/google-deepmind/mujoco_menagerie.git")
-        print("2. Specify the path to the G1 model when running the script:")
-        print("   python interactive_piano.py --unitree_g1_path=/path/to/mujoco_menagerie/unitree_g1/g1.xml")
-        print("\nContinuing with a simple placeholder...\n")
-        
-        # Try a very simple fallback: add a placeholder box
-        try:
-            print("Adding a placeholder box instead of G1...")
-            # This should work with most MuJoCo versions
-            placeholder = arena.mjcf_model.worldbody.add(
-                'geom',
-                name='g1_placeholder',
-                type='box',
-                size=[0.2, 0.3, 0.8],  # Roughly humanoid sized
-                pos=position,
-                rgba=[0.2, 0.2, 0.2, 0.8]  # Semi-transparent dark gray
-            )
-            print("Added placeholder box to represent G1")
-            return placeholder
-        except Exception as box_error:
-            print(f"Even placeholder box failed: {box_error}")
-            return None
+                
+        if model_path is None:
+            print("Could not find Unitree G1 model. Please clone the MuJoCo Menagerie repository")
+            print("and make sure the g1.xml file is in mujoco_menagerie/unitree_g1/g1.xml")
+            print("\nTo properly integrate the Unitree G1 model, please:")
+            print("1. Clone the MuJoCo Menagerie repository:")
+            print("   git clone https://github.com/google-deepmind/mujoco_menagerie.git")
+            print("2. Specify the path to the G1 model when running the script:")
+            print("   python interactive_piano.py --unitree_g1_path=/path/to/mujoco_menagerie/unitree_g1/g1.xml")
+            print("\nContinuing with a simple placeholder...\n")
+            
+            # Try a very simple fallback: add a placeholder box
+            try:
+                print("Adding a placeholder box instead of G1...")
+                # This should work with most MuJoCo versions
+                placeholder = arena.mjcf_model.worldbody.add(
+                    'geom',
+                    name='g1_placeholder',
+                    type='box',
+                    size=[0.2, 0.3, 0.8],  # Roughly humanoid sized
+                    pos=position,
+                    rgba=[0.2, 0.2, 0.2, 0.8]  # Semi-transparent dark gray
+                )
+                print("Added placeholder box to represent G1")
+                return placeholder
+            except Exception as box_error:
+                print(f"Even placeholder box failed: {box_error}")
+                return None
     
     print(f"Loading G1 model from: {model_path}")
     
