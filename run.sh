@@ -173,28 +173,28 @@
 #     --entropy-coef 0.01 \
 
 
-# SAC Droq Cruel Angel's Thesis middle 15, resumed from 42-2025-02-28-21-38-57/checkpoint_00880000
-# WANDB_DIR=/tmp/robopianist/ MUJOCO_GL=glfw XLA_PYTHON_CLIENT_PREALLOCATE=false python train.py \
-#     --root-dir /Users/almondgod/Repositories/robopianist/robopianist-rl/models/CruelAngelsThesismiddle15s \
-#     --warmstart-steps 5000 \
-#     --max-steps 5000000 \
-#     --discount 0.8 \
-#     --agent-config.critic-dropout-rate 0.01 \
-#     --agent-config.critic-layer-norm \
-#     --agent-config.hidden-dims 256 256 256 \
-#     --trim-silence \
-#     --gravity-compensation \
-#     --reduced-action-space \
-#     --control-timestep 0.05 \
-#     --n-steps-lookahead 10 \
-#     --midi-file "/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid" \
-#     --action-reward-observation \
-#     --primitive-fingertip-collisions \
-#     --eval-episodes 1 \
-#     --camera-id "piano/back" \
-#     --tqdm-bar \
-#     --eval-interval 40000 \
-#     --load-checkpoint "/Users/almondgod/Repositories/robopianist/robopianist-rl/models/CruelAngelsThesismiddle15s/SAC-/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid-42-2025-02-28-21-38-57/checkpoint_00880000.pkl"
+# SAC Droq Cruel Angel's Thesis middle 15, resumed from 42-2025-02-28-21-38-57/checkpoint_00880000, 42-2025-03-01-10-57-51/checkpoint_00600000
+WANDB_DIR=/tmp/robopianist/ MUJOCO_GL=glfw XLA_PYTHON_CLIENT_PREALLOCATE=false python train.py \
+    --root-dir /Users/almondgod/Repositories/robopianist/robopianist-rl/models/CruelAngelsThesismiddle15s \
+    --warmstart-steps 5000 \
+    --max-steps 5000000 \
+    --discount 0.8 \
+    --agent-config.critic-dropout-rate 0.01 \
+    --agent-config.critic-layer-norm \
+    --agent-config.hidden-dims 256 256 256 \
+    --trim-silence \
+    --gravity-compensation \
+    --reduced-action-space \
+    --control-timestep 0.05 \
+    --n-steps-lookahead 10 \
+    --midi-file "/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid" \
+    --action-reward-observation \
+    --primitive-fingertip-collisions \
+    --eval-episodes 1 \
+    --camera-id "piano/back" \
+    --tqdm-bar \
+    --eval-interval 40000 \
+    --load-checkpoint "/Users/almondgod/Repositories/robopianist/robopianist-rl/models/CruelAngelsThesismiddle15s/SAC-/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid-42-2025-03-01-10-57-51/checkpoint_00600000.pkl"
 
 
 # Hybrid GRPO Cruel Angel's Thesis middle 15 - OPTIMIZED VERSION
@@ -254,15 +254,16 @@ WANDB_DIR=/tmp/robopianist/ MUJOCO_GL=glfw XLA_PYTHON_CLIENT_PREALLOCATE=false p
     --mini-batch-size 32 \
     --batch-size 32
 
-# QTOpt Base
+# QTOpt Base, loaded from 42-2025-03-01-22-39-16/checkpoint_00087000
 WANDB_DIR=/tmp/robopianist/ MUJOCO_GL=glfw XLA_PYTHON_CLIENT_PREALLOCATE=false python train.py \
   --algorithm qtopt \
   --root_dir /Users/almondgod/Repositories/robopianist/robopianist-rl/models/QTOpt-v1-CruelAngelsThesismiddle15s \
-  --name "qtopt-cem-tuned-v2" \
-  --cem_iterations 5 \
-  --cem_population_size 128 \
-  --cem_elite_fraction 0.15 \
-  --agent_config.hidden_dims 512 256 256 \
+  --warmstart-steps 5000 \
+  --max-steps 5000000 \
+  --cem_iterations 2 \
+  --cem_population_size 64 \
+  --cem_elite_fraction 0.1 \
+  --agent_config.hidden_dims 256 256 256 \
   --midi-file "/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid" \
   --trim-silence \
   --gravity-compensation \
@@ -271,4 +272,6 @@ WANDB_DIR=/tmp/robopianist/ MUJOCO_GL=glfw XLA_PYTHON_CLIENT_PREALLOCATE=false p
   --n-steps-lookahead 10 \
   --action-reward-observation \
   --primitive-fingertip-collisions \
-  --tqdm-bar
+  --tqdm-bar \
+  --eval-interval 10000 \
+  --load-checkpoint "/Users/almondgod/Repositories/robopianist/robopianist-rl/models/QTOpt-v1-CruelAngelsThesismiddle15s/QTOPT-/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid-42-2025-03-01-22-39-16/checkpoint_00087000.pkl"
