@@ -32,51 +32,24 @@ import robopianist.wrappers as robopianist_wrappers
 import dm_env_wrappers as wrappers
 from dm_control.composer import Entity
 
-
-@dataclass(frozen=True)
-class Args:
-    """Arguments for the interactive piano environment."""
-    # Environment configuration
-    seed: int = 42
-    midi_file: Optional[Path] = None
-    environment_name: str = "RoboPianist-debug-TwinkleTwinkleLittleStar-v0"
-    n_steps_lookahead: int = 10
-    trim_silence: bool = False
-    control_timestep: float = 0.05
-    stretch_factor: float = 1.0
-    shift_factor: int = 0
-    wrong_press_termination: bool = False
-    disable_fingering_reward: bool = False
-    disable_forearm_reward: bool = False
-    disable_colorization: bool = False
-    disable_hand_collisions: bool = False
-    
-    # Unitree G1 integration
-    add_unitree_g1: bool = True
-    unitree_g1_path: Optional[str] = None  # Path to Unitree G1 model, if None will use default
-    unitree_position: Tuple[float, float, float] = (0.0, 0.4, 0.0)  # Behind the piano
-    
-    # Viewer configuration
-    width: int = 1024 
-    height: int = 768
-    camera_id: Optional[str | int] = "piano/back"
-
-
 class G1Entity(Entity):
     """Entity wrapper for Unitree G1 model.
     
     This class wraps the G1 model as a dm_control Entity, making it compatible with
     the robopianist and dm_control APIs.
     """
-    
+
     def __init__(self, model_path):
         """Initialize G1Entity.
-        
+
         Args:
             model_path: Path to the G1 model XML file
         """
         self._model_path = model_path
         self._attached = []  # Necessary for Entity interface
+        
+        # Create empty observables collection
+        self._observables = {}
         
         # Fix the XML file by removing keyframes and fixing mesh paths
         import tempfile
@@ -162,9 +135,14 @@ class G1Entity(Entity):
             except Exception as asset_error:
                 print(f"All attempts to load G1 model failed: {asset_error}")
                 raise
-        
+             
         # Build entity-specific attributes
         self._build()
+        
+        # Initialize the actuators
+        self._actuators = []
+        for actuator in self.mjcf_model.find_all('actuator'):
+            self._actuators.append(actuator)
     
     @property
     def mjcf_model(self):
@@ -172,42 +150,81 @@ class G1Entity(Entity):
         return self._mjcf_model
     
     def _build(self, name=None):
-        """Build the entity."""
-        # Nothing to do here, the model is already loaded
+        """Build any entity-specific attributes."""
         pass
     
     def initialize_episode(self, physics, random_state):
-        """Initialize the entity for a new episode.
-        
-        Args:
-            physics: The physics object
-            random_state: A numpy random state object
-        """
-        # Nothing to do here, we'll handle initialization in the add_unitree_g1_to_env function
+        """Initialize the episode."""
         pass
     
     @property
     def actuators(self):
         """Return the actuators of the model."""
-        return self._mjcf_model.find_all('actuator')
+        return self._actuators
         
     def attach(self, entity, attachment_site):
-        """Attach another entity to this one.
+        """Attach this entity to another entity.
         
         Args:
-            entity: The entity to attach
-            attachment_site: The site to attach it to
+            entity: The entity to attach to
+            attachment_site: The site to attach to
             
         Returns:
             The attached entity
         """
-        self._attached.append(entity)
+        entity.attach(self, attachment_site)
+        self._attached.append((entity, attachment_site))
         return entity
+        
+    @property
+    def observables(self):
+        """Return the observables of the entity."""
+        # Required by dm_control Entity interface
+        class ObservablesWrapper:
+            def __init__(self, obs_dict):
+                self._obs_dict = obs_dict
+                
+            def as_dict(self):
+                return self._obs_dict
+                
+        return ObservablesWrapper(self._observables)
+
+
+@dataclass(frozen=True)
+class Args:
+    """Arguments for the interactive piano environment."""
+    # Environment configuration
+    seed: int = 42
+    midi_file: Optional[Path] = None
+    environment_name: str = "RoboPianist-debug-TwinkleTwinkleLittleStar-v0"
+    n_steps_lookahead: int = 10
+    trim_silence: bool = False
+    control_timestep: float = 0.05
+    stretch_factor: float = 1.0
+    shift_factor: int = 0
+    wrong_press_termination: bool = False
+    disable_fingering_reward: bool = False
+    disable_forearm_reward: bool = False
+    disable_colorization: bool = False
+    disable_hand_collisions: bool = False
+    
+    # Unitree G1 integration
+    add_unitree_g1: bool = True
+    unitree_g1_path: Optional[str] = None  # Path to Unitree G1 model, if None will use default
+    unitree_position: Tuple[float, float, float] = (0.0, 0.4, 0.0)  # Behind the piano
+    
+    # Viewer configuration
+    width: int = 1024 
+    height: int = 768
+    camera_id: Optional[str | int] = "piano/back"
 
 
 def get_env(args: Args):
     """Create the environment based on provided arguments."""
-    # Create basic piano environment
+    # Define elevation amount
+    elevation = 0.7
+    
+    # Load the environment first - we'll modify it before it's fully initialized
     env = suite.load(
         environment_name=args.environment_name,
         midi_file=args.midi_file,
@@ -227,17 +244,205 @@ def get_env(args: Args):
         ),
     )
     
-    # Add Unitree G1 if requested
-    if args.add_unitree_g1:
-        add_unitree_g1_to_env(env, args.unitree_position, args.unitree_g1_path)
+    # Now modify the XML model directly before physics compilation
+    arena = env.task.arena
+    piano = env.task.piano
     
-    # Add evaluation and sound wrappers for better interaction
+    # ADD PRINT STATEMENTS TO ANALYZE PIANO STRUCTURE
+    print("\n========== PIANO STRUCTURE ANALYSIS ==========")
+    print(f"Piano type: {type(piano)}")
+    
+    # Print all bodies in the piano model
+    piano_bodies = piano.mjcf_model.find_all('body')
+    print(f"Found {len(piano_bodies)} bodies in piano model")
+    
+    # Print the first few bodies to understand structure
+    for i, body in enumerate(piano_bodies[:5]):
+        print(f"Body {i}: name={body.name}, pos={body.pos}")
+        
+    # Print all child bodies of the base
+    piano_base = piano.mjcf_model.find('body', 'base')
+    if piano_base:
+        base_children = piano_base.find_all('body')
+        print(f"Base has {len(base_children)} child bodies")
+        for i, child in enumerate(base_children[:5]):
+            print(f"  Child {i}: name={child.name}, pos={child.pos}")
+            
+    # Check for keys specifically
+    white_keys = [b for b in piano_bodies if b.name and 'white_key' in b.name]
+    black_keys = [b for b in piano_bodies if b.name and 'black_key' in b.name]
+    print(f"Found {len(white_keys)} white keys and {len(black_keys)} black keys")
+    
+    # Print a few key bodies to see their structure
+    if white_keys:
+        print("\nSample white key structure:")
+        print(f"  Name: {white_keys[0].name}")
+        print(f"  Position: {white_keys[0].pos}")
+        geoms = white_keys[0].find_all('geom')
+        print(f"  Has {len(geoms)} geoms")
+        
+    if black_keys:
+        print("\nSample black key structure:")
+        print(f"  Name: {black_keys[0].name}")
+        print(f"  Position: {black_keys[0].pos}")
+        geoms = black_keys[0].find_all('geom')
+        print(f"  Has {len(geoms)} geoms")
+        
+    print("\n========== END PIANO ANALYSIS ==========")
+    
+    print("\n========== ELEVATING COMPONENTS ==========")
+    
+    # 1. Add a platform under everything
+    # worldbody = arena.mjcf_model.worldbody
+ 
+    # print("Added platform at height", elevation/2)
+    
+    # 2. Directly modify all body positions in the MJCF model BEFORE physics compilation
+    # This ensures the changes persist through resets
+    
+    # Function to elevate a body in the MJCF model
+    def elevate_mjcf_body(body):
+        try:
+            orig_pos = body.pos
+            if orig_pos is not None:
+                # Create new position tuple with increased z-coordinate
+                new_pos = (orig_pos[0], orig_pos[1], orig_pos[2] + elevation)
+                body.pos = new_pos
+                return True
+            return False
+        except Exception as e:
+            print(f"Error elevating body {body}: {e}")
+            return False
+    
+    # First elevate the piano
+    piano_base = piano.mjcf_model.find('body', 'base')
+    if piano_base:
+        success = elevate_mjcf_body(piano_base)
+        print(f"Elevated piano base: {success}")
+    
+    # Elevate all piano keys
+    elevated_keys = 0
+    white_keys = [b for b in piano.mjcf_model.find_all('body') if b.name and 'white_key' in b.name]
+    black_keys = [b for b in piano.mjcf_model.find_all('body') if b.name and 'black_key' in b.name]
+    
+    # Elevate white keys
+    for key in white_keys:
+        if elevate_mjcf_body(key):
+            elevated_keys += 1
+    
+    # Elevate black keys
+    for key in black_keys:
+        if elevate_mjcf_body(key):
+            elevated_keys += 1
+    
+    print(f"Elevated {elevated_keys} piano keys")
+    
+    # Check for and elevate both shadow hands
+    hands_elevated = 0
+    left_hand = getattr(env.task, 'left_hand', None)
+    right_hand = getattr(env.task, 'right_hand', None)
+    
+    if left_hand:
+        # Get main body of left hand
+        left_bodies = left_hand.mjcf_model.find_all('body')
+        if left_bodies:
+            root_body = left_bodies[0]  # Usually the first one is the root
+            success = elevate_mjcf_body(root_body)
+            print(f"Elevated left hand: {success}")
+            hands_elevated += 1
+    
+    if right_hand:
+        # Get main body of right hand
+        right_bodies = right_hand.mjcf_model.find_all('body')
+        if right_bodies:
+            root_body = right_bodies[0]  # Usually the first one is the root
+            success = elevate_mjcf_body(root_body)
+            print(f"Elevated right hand: {success}")
+            hands_elevated += 1
+            
+    print(f"Elevated {hands_elevated} hands")
+    
+    # 3. Reload physics with our modified model - use a simpler approach that works
+    # with the RoboPianist environment structure
+    try:
+        # Instead of using physics_randomizers, let's reload the physics directly
+        # from the modified MJCF model
+        physics = env.physics
+        physics.reload_from_mjcf_model(arena.mjcf_model)
+        print("Reloaded physics with modified model")
+        
+        # Add validation print statements
+        print("\n========== VALIDATING KEY POSITIONS AFTER RELOAD ==========")
+        # Get key positions from physics for a few sample keys
+        for i, key_name in enumerate(['piano/white_key_0', 'piano/black_key_1', 'piano/white_key_2']):
+            try:
+                key_id = physics.model.name2id(key_name, 'body')
+                if key_id >= 0:
+                    key_pos = physics.data.xpos[key_id]
+                    print(f"Key {key_name} position: {key_pos}")
+            except Exception as e:
+                print(f"Error getting position for {key_name}: {e}")
+                
+    except Exception as e:
+        print(f"Error reloading physics: {e}")
+        print("Continuing with original physics...")
+    
+    print("==========================================\n")
+    
+    # 4. Add Unitree G1 if requested, at the elevated position
+    if args.add_unitree_g1:
+        # Move 0.3 units in negative x direction and keep all other position values
+        g1_pos = (
+            args.unitree_position[0] + 0.3,  # Move 0.3 units in negative x direction
+            args.unitree_position[1] - 0.3, 
+            args.unitree_position[2]
+        )
+        # Use our enhanced function that properly handles errors
+        add_unitree_g1_to_env(env, g1_pos, args.unitree_g1_path)
+        
+        # After G1 is created, update the initialization function to use 180 degree rotation
+        if hasattr(env, 'initialize_g1_pose'):
+            old_init_pose = env.initialize_g1_pose
+            
+            # Create a wrapper that sets a 180 degree rotation around z-axis
+            def rotated_g1_pose(physics):
+                result = old_init_pose(physics)
+                try:
+                    # Add debug prints to find the correct body
+                    print("\nAttempting to rotate G1 - available bodies:")
+                    body_names = []
+                    for i in range(physics.model.nbody):
+                        body_name = physics.model.id2name(i, 'body')
+                        if body_name and ('pelvis' in body_name.lower() or 'base' in body_name.lower() or 'g1' in body_name.lower() or 'torso' in body_name.lower()):
+                            body_names.append((i, body_name))
+                    
+                    print(f"Potential G1 bodies: {body_names}")
+                    
+                    # Try all possible body names for the G1 robot
+                    rotated = False
+                    for body_id, name in body_names:
+                        try:
+                            # Set 180 degree rotation quaternion [0,0,1,0]
+                            physics.data.xquat[body_id] = [0, 0, 1, 0]  # 180 degrees around Z
+                            print(f"Successfully rotated G1 body: {name}")
+                            rotated = True
+                        except Exception as e:
+                            print(f"Error rotating body {name}: {e}")
+                    
+                    if not rotated:
+                        print("Could not find any G1 body to rotate!")
+                        
+                except Exception as e:
+                    print(f"Error rotating G1: {e}")
+                return result
+            
+            # Replace the init function with our rotated version
+            env.initialize_g1_pose = rotated_g1_pose
+    
+    # 5. Add evaluation wrapper
     env = robopianist_wrappers.MidiEvaluationWrapper(
         environment=env, deque_size=1
     )
-    
-    # Add piano sound wrapper (if needed)
-    # env = robopianist_wrappers.PianoSoundWrapper(environment=env)
     
     return env
 
@@ -349,32 +554,102 @@ def add_unitree_g1_to_env(env, position, model_path=None):
         def initialize_g1_pose(physics):
             try:
                 # Find the pelvis body which is the root of the G1 model
-                body_name = "g1_29dof_rev_1_0/pelvis"
+                body_name = "g1_29dof_rev_1_0/pelvis"  # This is the exact name from the log
                 pelvis_id = physics.model.name2id(body_name, "body")
                 
                 if pelvis_id >= 0:
                     print(f"Setting G1 position and orientation for body_id: {pelvis_id} ({body_name})")
                     
+                    # Print the original quaternion
+                    original_quat = physics.data.xquat[pelvis_id].copy()
+                    print(f"Original G1 quaternion: {original_quat}")
+                    
+                    # Print original position
+                    original_pos = physics.data.xpos[pelvis_id].copy()
+                    print(f"Original G1 position: {original_pos}")
+                    
                     # Since we removed the freejoint, we need to directly set the position
                     # using xpos and xquat instead of qpos
-                    physics.data.xpos[pelvis_id] = position
-                    physics.data.xquat[pelvis_id] = [1, 0, 0, 0]  # Identity quaternion
+                    new_position = position.copy()  # Make a copy to avoid modifying the original
+                    # Ensure we're moving in negative X direction
+                    new_position = (new_position[0] - 0.3, new_position[1], new_position[2])
+                    print(f"Setting G1 position to: {new_position}")
+                    physics.data.xpos[pelvis_id] = new_position
+                    
+                    # There are different conventions for quaternions, let's try another format
+                    # For a 180-degree rotation around Z axis:
+                    # MuJoCo quaternions are in w, x, y, z format where w is the real part
+                    # w = cos(angle/2), x,y,z = sin(angle/2)*axis
+                    # For 180 degrees (π radians), cos(π/2) = 0, sin(π/2) = 1
+                    # So for rotation around Z, we get [0, 0, 0, 1]
+                    physics.data.xquat[pelvis_id] = [0, 0, 0, 1]  # Try a different quaternion
+                    print(f"New G1 quaternion: {physics.data.xquat[pelvis_id]}")
+                    print(f"Applied 180 degree rotation around Z axis to {body_name}")
+                    
+                    # Let's also try rotating additional bodies (arms, legs) to make it more visible
+                    # List other potential body parts to rotate
+                    related_body_parts = []
+                    for i in range(physics.model.nbody):
+                        name = physics.model.id2name(i, 'body')
+                        if name and body_name.split('/')[0] in name:
+                            related_body_parts.append((i, name))
+                    
+                    print(f"Found {len(related_body_parts)} related G1 body parts")
+                    # Rotate a few key parts to make the rotation more visible
+                    for i, name in related_body_parts[:5]:  # Just the first few
+                        try:
+                            physics.data.xquat[i] = [0, 0, 0, 1]
+                            print(f"Also rotated: {name}")
+                        except:
+                            pass
+                            
+                    # Force a forward step to apply changes
+                    try:
+                        physics.forward()
+                        print("Forced physics forward step to apply changes")
+                        # Check if the changes persisted
+                        after_quat = physics.data.xquat[pelvis_id].copy()
+                        after_pos = physics.data.xpos[pelvis_id].copy()
+                        print(f"Quaternion after forward: {after_quat}")
+                        print(f"Position after forward: {after_pos}")
+                    except Exception as e:
+                        print(f"Error in physics forward: {e}")
+                    
                 else:
                     print(f"Warning: Could not find G1 pelvis body with name: {body_name}")
+                    
+                # List all bodies to see what's available
+                print(f"DEBUG: Available bodies in the physics model:")
+                for i in range(min(10, physics.model.nbody)):  # Just print first 10 to avoid spam
+                    name = physics.model.id2name(i, 'body')
+                    print(f"  Body {i}: {name}")
+                print(f"  (... and {physics.model.nbody - 10} more)")
+                    
             except Exception as e:
                 print(f"Warning: Could not initialize G1 pose: {e}")
+                import traceback
+                traceback.print_exc()
                 pass
                 
         def reset_with_g1_orientation(*args, **kwargs):
             # Call the original reset
             result = old_reset(*args, **kwargs)
-            
-            # Now adjust the G1 orientation
+            print("Environment reset called, applying G1 orientation...")
             try:
+                # Initialize the G1 pose
                 initialize_g1_pose(env.physics)
-            except Exception as e:
-                print(f"Error setting G1 orientation: {e}")
                 
+                # Add another check after physics settles
+                physics = env.physics
+                body_name = "g1_29dof_rev_1_0/pelvis"  # This is the exact name from the log
+                pelvis_id = physics.model.name2id(body_name, "body")
+                if pelvis_id >= 0:
+                    print(f"After reset - G1 quaternion: {physics.data.xquat[pelvis_id]}")
+                    print(f"After reset - G1 position: {physics.data.xpos[pelvis_id]}")
+                
+            except Exception as e:
+                print(f"Error in reset_with_g1_orientation: {e}")
+            
             return result
             
         # Replace the reset method with our custom one
@@ -391,21 +666,7 @@ def add_unitree_g1_to_env(env, position, model_path=None):
         print("3. Your MuJoCo version is compatible with the model")
         print("\nFalling back to a placeholder box...\n")
         
-        # Try a simple fallback: add a placeholder box
-        try:
-            placeholder = arena.mjcf_model.worldbody.add(
-                'geom',
-                name='g1_placeholder',
-                type='box',
-                size=[0.2, 0.3, 0.8],  # Roughly humanoid sized
-                pos=position,
-                rgba=[0.2, 0.2, 0.2, 0.8]  # Semi-transparent dark gray
-            )
-            print("Added placeholder box to represent G1")
-            return placeholder
-        except Exception as box_error:
-            print(f"Even placeholder box failed: {box_error}")
-            return None
+        return None
 
 
 def random_policy(time_step):
