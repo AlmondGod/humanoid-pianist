@@ -99,6 +99,10 @@ class CPLRewardWrapper:
 
 def get_env(args, record_dir=None):
     """Set up the environment."""
+    # Force reduced action space to match training
+    args = copy(args)
+    args.reduced_action_space = True  # Force this to match training
+    
     env = suite.load(
         environment_name=args.environment_name if hasattr(args, 'environment_name') and args.environment_name else None,
         midi_file=args.midi_file,
@@ -107,7 +111,7 @@ def get_env(args, record_dir=None):
             n_steps_lookahead=args.n_steps_lookahead,
             trim_silence=args.trim_silence,
             gravity_compensation=args.gravity_compensation,
-            reduced_action_space=args.reduced_action_space,
+            reduced_action_space=args.reduced_action_space,  # Now always True
             control_timestep=args.control_timestep,
             wrong_press_termination=args.wrong_press_termination,
             disable_fingering_reward=args.disable_fingering_reward,
@@ -190,37 +194,71 @@ def finetune(args):
             mode=args.wandb_mode,
         )
     
+    # Print environment settings
+    print("\nEnvironment Settings:")
+    print(f"action_reward_observation: {args.action_reward_observation}")
+    print(f"reduced_action_space: {args.reduced_action_space}")
+    print(f"frame_stack: {args.frame_stack}")
+    print(f"disable_fingering_reward: {args.disable_fingering_reward}")
+    
+    print("\nAction Space Analysis:")
+    # Print before creating environment
+    print("Args settings:")
+    print(f"reduced_action_space flag: {args.reduced_action_space}")
+    print(f"gravity_compensation flag: {args.gravity_compensation}")
+    
     # Create environments
     env = get_env(args)
     eval_env = get_env(args, record_dir=args.record_dir)
     
+    # Print after environment creation
+    print("\nEnvironment Action Space:")
+    print(f"Action spec shape: {env.action_spec().shape}")
+    print(f"Action spec minimum: {env.action_spec().minimum}")
+    print(f"Action spec maximum: {env.action_spec().maximum}")
+    
+    # Add detailed observation debugging
+    timestep = env.reset()
+    print("\nDetailed Observation Info:")
+    print(f"Raw observation shape: {timestep.observation.shape}")
+    
+    # Print environment wrapper stack
+    print("\nEnvironment Wrapper Stack:")
+    current_env = env
+    while hasattr(current_env, 'env'):
+        print(f"- {current_env.__class__.__name__}")
+        current_env = current_env.env
+    print(f"- {current_env.__class__.__name__}")
+    
     # Print observation dimensions
     timestep = env.reset()
+    print(f"\nObservation Info:")
     print(f"Current environment observation shape: {timestep.observation.shape}")
     
     # Load the checkpoint to check dimensions
     with open(args.sac_checkpoint, 'rb') as f:
         sac_checkpoint = pickle.load(f)
-    
-    # Print model dimensions if available
-    if 'observation_dim' in sac_checkpoint:
-        print(f"Model observation dimension: {sac_checkpoint['observation_dim']}")
-    else:
-        print("Model observation dimension not stored in checkpoint")
+        
+    # Try to extract network info from checkpoint
+    print("\nCheckpoint Info:")
+    if 'params' in sac_checkpoint:
+        # Look at the first layer's weight matrix shape
+        first_layer_shape = None
+        for key, value in sac_checkpoint['params'].items():
+            if 'Dense_0' in str(key):
+                if hasattr(value, 'kernel'):
+                    first_layer_shape = value.kernel.shape
+                    break
+        print(f"First layer weight matrix shape in checkpoint: {first_layer_shape}")
     
     # Get environment spec
     original_spec = EnvironmentSpec.make(env)
-    
-    print(f"Original spec attributes: {dir(original_spec)}")
-    
-    # Create a wrapped spec with modified observation dimension
-    spec = SpecAdapter(original_spec)
     
     # Create replay buffer
     replay_buffer = ReplayBuffer(
         capacity=args.replay_capacity,
         batch_size=args.batch_size,
-        spec=spec,
+        spec=original_spec
     )
     
     # Load pretrained SAC agent
@@ -234,7 +272,7 @@ def finetune(args):
     )
     
     agent = SAC.initialize(
-        spec,  
+        original_spec,  
         sac_config,
         seed=args.seed
     )
@@ -251,8 +289,11 @@ def finetune(args):
     print(f"Loading CPL reward model from {args.cpl_checkpoint}")
     
     # Get state/action dimensions from the environment
-    state_dim = spec.observation_dim
-    action_dim = spec.action_dim
+    state_dim = original_spec.observation_dim
+    action_dim = original_spec.action_dim
+
+    print(f"State dimension: {state_dim}")
+    print(f"Action dimension: {action_dim}")
     
     cpl_model = load_cpl_model(args.cpl_checkpoint, state_dim, action_dim)
     
@@ -273,10 +314,10 @@ def finetune(args):
     
     # Fine-tuning loop
     for i in tqdm(range(1, args.max_steps + 1), disable=not args.tqdm_bar):
-        truncated_obs = timestep.observation
-            
+        obs = timestep.observation
+        
         # Act with truncated observation
-        agent, action = agent.sample_actions(truncated_obs)
+        agent, action = agent.sample_actions(obs)
         
         # Step environment with CPL rewards
         timestep = env.step(action)
@@ -343,6 +384,33 @@ def finetune(args):
     if args.use_wandb:
         wandb.finish()
 
+    print("\nCheckpoint Analysis:")
+    if 'params' in sac_checkpoint:
+        # Find output layer dimensions
+        for key, value in sac_checkpoint['params'].items():
+            if 'OutputDenseMean' in str(key):
+                if hasattr(value, 'kernel'):
+                    output_shape = value.kernel.shape
+                    print(f"Checkpoint output layer shape: {output_shape}")
+                    break
+    
+    # Print action space info
+    print("\nAction Space Info:")
+    print(f"Environment action space: {env.action_spec().shape}")
+    print(f"Original spec action dim: {original_spec.action_dim}")
+    
+    # Print environment task kwargs
+    print("\nEnvironment Task Settings:")
+    if hasattr(env, 'task'):
+        task_kwargs = env.task._task_kwargs if hasattr(env.task, '_task_kwargs') else {}
+        print(f"Task kwargs: {task_kwargs}")
+
+    print("\nCheckpoint Action Space:")
+    if 'params' in sac_checkpoint:
+        output_layers = [(k, v.kernel.shape) for k, v in sac_checkpoint['params'].items() 
+                        if 'OutputDense' in k and hasattr(v, 'kernel')]
+        print(f"Output layer shapes in checkpoint: {output_layers}")
+
 
 def parse_args():
     """Parse command-line arguments."""
@@ -350,7 +418,7 @@ def parse_args():
     
     # Checkpoints
     parser.add_argument("--sac_checkpoint", type=str, 
-                        default="/Users/almondgod/Repositories/robopianist/robopianist-rl/models/CruelAngelsThesismiddle15s/SAC-/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid-42-2025-03-03-21-29-41/checkpoint_00920000.pkl",
+                        default="/Users/almondgod/Repositories/robopianist/robopianist-rl/models/CruelAngelsThesismiddle15s/SAC-/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid-42-2025-03-02-12-40-35/checkpoint_00680000.pkl",
                         help="Path to the pretrained SAC checkpoint")
     parser.add_argument("--cpl_checkpoint", type=str, 
                         default="/Users/almondgod/Repositories/robopianist/robopianist-rl/reward_model/checkpoint_latest.pkl",
@@ -366,20 +434,20 @@ def parse_args():
                         help="Trim silence from the beginning of the MIDI file")
     parser.add_argument("--gravity_compensation", action="store_true",
                         help="Use gravity compensation")
-    parser.add_argument("--reduced_action_space", action="store_true",
+    parser.add_argument("--reduced_action_space", type=bool, default=True,
                         help="Use reduced action space")
     parser.add_argument("--control_timestep", type=float, default=0.05,
                         help="Control timestep")
     parser.add_argument("--n_steps_lookahead", type=int, default=10,
                         help="Number of steps to look ahead")
-    parser.add_argument("--disable_fingering_reward", action="store_true",
+    parser.add_argument("--disable_fingering_reward", type=bool, default=True,
                         help="Disable fingering reward")
     parser.add_argument("--disable_forearm_reward", action="store_true",
                         help="Disable forearm reward")
     parser.add_argument("--wrong_press_termination", action="store_true",
                         help="Terminate episode on wrong key press")
-    parser.add_argument("--action_reward_observation", action="store_true",
-                        help="Include action and reward in observations")
+    parser.add_argument("--action_reward_observation", type=bool, default=True,
+                        help="Include action and reward in observation")
     
     # Training settings
     parser.add_argument("--output_dir", type=str, default="rlhf_models",
@@ -538,37 +606,6 @@ class ReplayBuffer:
     def is_ready(self):
         """Check if the buffer has enough data for training."""
         return len(self.storage) >= 1 and self.num_episodes >= 1
-
-
-class SpecAdapter:
-    """Adapter to modify spec dimensions without changing the actual spec."""
-    
-    def __init__(self, original_spec, override_obs_dim=None):
-        """
-        Create a spec adapter that wraps the original spec.
-        
-        Args:
-            original_spec: The original environment spec
-            override_obs_dim: Override for observation dimension (if None, use original)
-        """
-        self._original_spec = original_spec
-        self._override_obs_dim = override_obs_dim
-    
-    @property
-    def observation_dim(self):
-        """Get (potentially overridden) observation dimension."""
-        if self._override_obs_dim is not None:
-            return self._override_obs_dim
-        return self._original_spec.observation_dim
-    
-    @property
-    def action_dim(self):
-        """Get action dimension from original spec."""
-        return self._original_spec.action_dim
-    
-    # Forward all other attribute accesses to the original spec
-    def __getattr__(self, name):
-        return getattr(self._original_spec, name)
 
 if __name__ == "__main__":
     args = parse_args()
