@@ -176,10 +176,6 @@ def prefix_dict(prefix: str, d: dict) -> dict:
 
 def finetune(args):
     """Fine-tune the SAC agent using the CPL reward model."""
-
-
-    print("Transition class fields:", Transition.__annotations__ if hasattr(Transition, '__annotations__') else "No annotations found")
-
     # Set seeds
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -198,62 +194,19 @@ def finetune(args):
             mode=args.wandb_mode,
         )
     
-    # Print environment settings
-    print("\nEnvironment Settings:")
-    print(f"action_reward_observation: {args.action_reward_observation}")
-    print(f"reduced_action_space: {args.reduced_action_space}")
-    print(f"frame_stack: {args.frame_stack}")
-    print(f"disable_fingering_reward: {args.disable_fingering_reward}")
-    
-    print("\nAction Space Analysis:")
-    # Print before creating environment
-    print("Args settings:")
-    print(f"reduced_action_space flag: {args.reduced_action_space}")
-    print(f"gravity_compensation flag: {args.gravity_compensation}")
-    
     # Create environments
     env = get_env(args)
     eval_env = get_env(args, record_dir=args.record_dir)
     
-    # Print after environment creation
-    print("\nEnvironment Action Space:")
-    print(f"Action spec shape: {env.action_spec().shape}")
-    print(f"Action spec minimum: {env.action_spec().minimum}")
-    print(f"Action spec maximum: {env.action_spec().maximum}")
-    
     # Add detailed observation debugging
     timestep = env.reset()
-    print("\nDetailed Observation Info:")
-    print(f"Raw observation shape: {timestep.observation.shape}")
-    
-    # Print environment wrapper stack
-    print("\nEnvironment Wrapper Stack:")
-    current_env = env
-    while hasattr(current_env, 'env'):
-        print(f"- {current_env.__class__.__name__}")
-        current_env = current_env.env
-    print(f"- {current_env.__class__.__name__}")
     
     # Print observation dimensions
     timestep = env.reset()
-    print(f"\nObservation Info:")
-    print(f"Current environment observation shape: {timestep.observation.shape}")
     
     # Load the checkpoint to check dimensions
     with open(args.sac_checkpoint, 'rb') as f:
         sac_checkpoint = pickle.load(f)
-        
-    # Try to extract network info from checkpoint
-    print("\nCheckpoint Info:")
-    if 'params' in sac_checkpoint:
-        # Look at the first layer's weight matrix shape
-        first_layer_shape = None
-        for key, value in sac_checkpoint['params'].items():
-            if 'Dense_0' in str(key):
-                if hasattr(value, 'kernel'):
-                    first_layer_shape = value.kernel.shape
-                    break
-        print(f"First layer weight matrix shape in checkpoint: {first_layer_shape}")
     
     # Get environment spec
     original_spec = EnvironmentSpec.make(env)
@@ -295,9 +248,6 @@ def finetune(args):
     # Get state/action dimensions from the environment
     state_dim = original_spec.observation_dim
     action_dim = original_spec.action_dim
-
-    print(f"State dimension: {state_dim}")
-    print(f"Action dimension: {action_dim}")
     
     cpl_model = load_cpl_model(args.cpl_checkpoint, state_dim, action_dim)
     
@@ -388,33 +338,6 @@ def finetune(args):
     if args.use_wandb:
         wandb.finish()
 
-    print("\nCheckpoint Analysis:")
-    if 'params' in sac_checkpoint:
-        # Find output layer dimensions
-        for key, value in sac_checkpoint['params'].items():
-            if 'OutputDenseMean' in str(key):
-                if hasattr(value, 'kernel'):
-                    output_shape = value.kernel.shape
-                    print(f"Checkpoint output layer shape: {output_shape}")
-                    break
-    
-    # Print action space info
-    print("\nAction Space Info:")
-    print(f"Environment action space: {env.action_spec().shape}")
-    print(f"Original spec action dim: {original_spec.action_dim}")
-    
-    # Print environment task kwargs
-    print("\nEnvironment Task Settings:")
-    if hasattr(env, 'task'):
-        task_kwargs = env.task._task_kwargs if hasattr(env.task, '_task_kwargs') else {}
-        print(f"Task kwargs: {task_kwargs}")
-
-    print("\nCheckpoint Action Space:")
-    if 'params' in sac_checkpoint:
-        output_layers = [(k, v.kernel.shape) for k, v in sac_checkpoint['params'].items() 
-                        if 'OutputDense' in k and hasattr(v, 'kernel')]
-        print(f"Output layer shapes in checkpoint: {output_layers}")
-
 
 def parse_args():
     """Parse command-line arguments."""
@@ -470,7 +393,7 @@ def parse_args():
                         help="Evaluation interval")
     parser.add_argument("--eval_episodes", type=int, default=1,
                         help="Number of episodes for evaluation")
-    parser.add_argument("--tqdm_bar", action="store_true",
+    parser.add_argument("--tqdm_bar", type=bool, default=True,
                         help="Show progress bar")
     
     # Recording settings
@@ -622,7 +545,13 @@ if __name__ == "__main__":
     # Convert string paths to Path objects
     if args.midi_file:
         args.midi_file = Path(args.midi_file)
-    if args.record_dir:
+    
+    # Create record directory based on midi file and checkpoint
+    if args.record_dir is None:
+        checkpoint_name = Path(args.sac_checkpoint).parent.name
+        timestamp = time.strftime('%Y-%m-%d-%H-%M-%S')
+        args.record_dir = Path("finetune_sac_videos") / f"{checkpoint_name}" / f"{timestamp}"
+    else:
         args.record_dir = Path(args.record_dir)
     
     finetune(args)
