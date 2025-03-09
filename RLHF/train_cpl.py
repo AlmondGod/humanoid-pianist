@@ -1,0 +1,378 @@
+import os
+import pickle
+import numpy as np
+import argparse
+import jax
+import jax.numpy as jnp
+from pathlib import Path
+import time
+import random
+import matplotlib.pyplot as plt
+from typing import List, Dict, Tuple, Any, Optional, Sequence
+from dataclasses import dataclass
+import json
+
+import sys
+sys.path.append('.')  # Add the root directory to path
+
+from RLHF.cpl import CPL, CPLConfig
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Train a reward model with Contrastive Preference Learning")
+    
+    # Dataset arguments
+    parser.add_argument("--data_dir", type=str, default="preference_data", 
+                        help="Directory with preference data")
+    parser.add_argument("--dataset", type=str, default="cpl_dataset.pkl",
+                        help="Filename of CPL dataset within data_dir")
+    
+    # Training arguments
+    parser.add_argument("--output_dir", type=str, default="reward_model", 
+                        help="Directory to save model checkpoints")
+    parser.add_argument("--num_epochs", type=int, default=100, 
+                        help="Number of training epochs")
+    parser.add_argument("--batch_size", type=int, default=64, 
+                        help="Batch size for training")
+    parser.add_argument("--learning_rate", type=float, default=3e-4, 
+                        help="Learning rate")
+    parser.add_argument("--weight_decay", type=float, default=1e-4, 
+                        help="Weight decay for regularization")
+    parser.add_argument("--dropout_rate", type=float, default=0.1, 
+                        help="Dropout rate")
+    parser.add_argument("--conservative_weight", type=float, default=0.0, 
+                        help="Weight for conservative regularization")
+    parser.add_argument("--grad_clip", type=float, default=1.0, 
+                        help="Gradient clipping threshold")
+    parser.add_argument("--seed", type=int, default=42, 
+                        help="Random seed")
+    parser.add_argument("--eval_interval", type=int, default=5, 
+                        help="Evaluate every N epochs")
+    parser.add_argument("--save_interval", type=int, default=10, 
+                        help="Save checkpoint every N epochs")
+    
+    # Model architecture
+    parser.add_argument("--hidden_dims", type=str, default="256,256,256", 
+                        help="Hidden dimensions of reward model")
+    
+    # Resume training
+    parser.add_argument("--resume", type=str, default=None, 
+                        help="Path to checkpoint to resume training from")
+    
+    return parser.parse_args()
+
+
+def load_dataset(data_path: str):
+    """Load CPL dataset."""
+    print(f"Loading dataset from {data_path}")
+    with open(data_path, 'rb') as f:
+        dataset = pickle.load(f)
+    
+    print(f"Loaded {len(dataset)} preference pairs")
+    
+    # Get dimensions from the first example
+    example = dataset[0]
+    state_dim = example["chosen"]["observations"][0].shape[0]
+    action_dim = example["chosen"]["actions"][0].shape[0]
+    
+    print(f"State dimension: {state_dim}")
+    print(f"Action dimension: {action_dim}")
+    
+    return dataset, state_dim, action_dim
+
+
+def prepare_batch(dataset, batch_indices):
+    """Prepare a batch of data for training."""
+    chosen_states = []
+    chosen_actions = []
+    rejected_states = []
+    rejected_actions = []
+    
+    for idx in batch_indices:
+        pair = dataset[idx]
+        
+        # Get chosen trajectory
+        chosen_states_traj = pair["chosen"]["observations"]
+        chosen_actions_traj = pair["chosen"]["actions"]
+        
+        # Get rejected trajectory
+        rejected_states_traj = pair["rejected"]["observations"]
+        rejected_actions_traj = pair["rejected"]["actions"]
+        
+        # Sample a random state-action pair from each trajectory
+        chosen_idx = np.random.randint(len(chosen_actions_traj))
+        rejected_idx = np.random.randint(len(rejected_actions_traj))
+        
+        chosen_states.append(chosen_states_traj[chosen_idx])
+        chosen_actions.append(chosen_actions_traj[chosen_idx])
+        rejected_states.append(rejected_states_traj[rejected_idx])
+        rejected_actions.append(rejected_actions_traj[rejected_idx])
+    
+    # Convert to arrays
+    chosen_states = np.array(chosen_states)
+    chosen_actions = np.array(chosen_actions)
+    rejected_states = np.array(rejected_states)
+    rejected_actions = np.array(rejected_actions)
+    
+    return chosen_states, chosen_actions, rejected_states, rejected_actions
+
+
+def evaluate_model(model, dataset, num_samples=100):
+    """Evaluate model on random samples from dataset."""
+    # Sample random preference pairs
+    indices = np.random.choice(len(dataset), min(num_samples, len(dataset)), replace=False)
+    
+    correct_predictions = 0
+    avg_confidence = 0.0
+    
+    for idx in indices:
+        pair = dataset[idx]
+        
+        # Get chosen trajectory
+        chosen_states = pair["chosen"]["observations"]
+        chosen_actions = pair["chosen"]["actions"]
+        
+        # Get rejected trajectory
+        rejected_states = pair["rejected"]["observations"]
+        rejected_actions = pair["rejected"]["actions"]
+        
+        # Compute preference probability
+        prob = model.preference_probability(chosen_states, chosen_actions, rejected_states, rejected_actions)
+        
+        # Count correct predictions (prob > 0.5 means chosen is preferred)
+        if prob > 0.5:
+            correct_predictions += 1
+        
+        avg_confidence += prob if prob > 0.5 else (1 - prob)
+    
+    accuracy = correct_predictions / len(indices)
+    avg_confidence = avg_confidence / len(indices)
+    
+    return {
+        "eval_accuracy": accuracy,
+        "eval_confidence": avg_confidence,
+    }
+
+
+def plot_training_curves(metrics_history, output_dir):
+    """Plot training curves."""
+    output_dir = Path(output_dir)
+    
+    # Create plots directory
+    plots_dir = output_dir / "plots"
+    plots_dir.mkdir(exist_ok=True, parents=True)
+    
+    # Plot loss
+    plt.figure(figsize=(10, 6))
+    plt.plot(metrics_history["epoch"], metrics_history["loss"], label="Loss")
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.title("Training Loss")
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(plots_dir / "loss.png")
+    plt.close()
+    
+    # Plot accuracy
+    plt.figure(figsize=(10, 6))
+    plt.plot(metrics_history["epoch"], metrics_history["accuracy"], label="Training Accuracy")
+    if "eval_accuracy" in metrics_history:
+        # Create a list of eval epochs and accuracies, filtering out None values
+        eval_epochs = [e for e, acc in zip(metrics_history["epoch"], metrics_history["eval_accuracy"]) if acc is not None]
+        eval_accuracies = [acc for acc in metrics_history["eval_accuracy"] if acc is not None]
+        plt.plot(eval_epochs, eval_accuracies, label="Eval Accuracy", marker='o')
+    plt.xlabel("Epoch")
+    plt.ylabel("Accuracy")
+    plt.title("Model Accuracy")
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(plots_dir / "accuracy.png")
+    plt.close()
+    
+    # Plot reward difference
+    plt.figure(figsize=(10, 6))
+    plt.plot(metrics_history["epoch"], metrics_history["mean_reward_diff"], label="Mean Reward Difference")
+    plt.xlabel("Epoch")
+    plt.ylabel("Reward Difference")
+    plt.title("Reward Difference between Chosen and Rejected")
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(plots_dir / "reward_diff.png")
+    plt.close()
+
+
+# Add this function to convert NumPy types to Python native types
+def convert_to_json_serializable(obj):
+    """Convert NumPy/JAX types to JSON serializable types."""
+    if isinstance(obj, (np.integer, np.int32, np.int64)):
+        return int(obj)
+    elif isinstance(obj, (np.floating, np.float32, np.float64)):
+        return float(obj)
+    elif isinstance(obj, (np.ndarray,)):
+        return obj.tolist()
+    elif isinstance(obj, dict):
+        return {k: convert_to_json_serializable(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_to_json_serializable(item) for item in obj]
+    else:
+        return obj
+
+
+def main():
+    args = parse_args()
+    
+    # Set random seeds
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    
+    # Create output directory
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Save args
+    with open(output_dir / "args.json", 'w') as f:
+        json.dump(vars(args), f, indent=2)
+    
+    # Load dataset
+    data_path = Path(args.data_dir) / args.dataset
+    dataset, state_dim, action_dim = load_dataset(str(data_path))
+    
+    # Create model config
+    hidden_dims = [int(dim) for dim in args.hidden_dims.split(',')]
+    config = CPLConfig(
+        hidden_dims=hidden_dims,
+        activation="gelu",
+        dropout_rate=args.dropout_rate,
+        learning_rate=args.learning_rate,
+        batch_size=args.batch_size,
+        weight_decay=args.weight_decay,
+        grad_clip=args.grad_clip,
+        conservative_weight=args.conservative_weight,
+    )
+    
+    # Create model
+    cpl_model = CPL(
+        state_dim=state_dim,
+        action_dim=action_dim,
+        config=config,
+        seed=args.seed,
+    )
+    
+    # Load checkpoint if resuming
+    if args.resume:
+        print(f"Resuming from checkpoint: {args.resume}")
+        cpl_model.load_checkpoint(args.resume)
+    
+    # Initialize metrics history
+    metrics_history = {
+        "epoch": [],
+        "loss": [],
+        "accuracy": [],
+        "mean_chosen_reward": [],
+        "mean_rejected_reward": [],
+        "mean_reward_diff": [],
+        "eval_accuracy": [],
+        "eval_confidence": [],
+    }
+    
+    # Training loop
+    print(f"Starting training for {args.num_epochs} epochs...")
+    start_time = time.time()
+    
+    for epoch in range(1, args.num_epochs + 1):
+        epoch_start_time = time.time()
+        
+        # Create batches
+        indices = np.arange(len(dataset))
+        np.random.shuffle(indices)
+        
+        # Split into batches
+        batches = [
+            indices[i:i+args.batch_size] 
+            for i in range(0, len(indices), args.batch_size)
+        ]
+        
+        # Train on batches
+        epoch_metrics = {
+            "loss": [],
+            "accuracy": [],
+            "mean_chosen_reward": [],
+            "mean_rejected_reward": [],
+            "mean_reward_diff": [],
+        }
+        
+        for batch_indices in batches:
+            # Prepare batch data
+            chosen_states, chosen_actions, rejected_states, rejected_actions = prepare_batch(dataset, batch_indices)
+            
+            # Update model
+            metrics = cpl_model.update_step(chosen_states, chosen_actions, rejected_states, rejected_actions)
+            
+            # Record metrics
+            for key, value in metrics.items():
+                epoch_metrics[key].append(value)
+        
+        # Compute average metrics for epoch
+        avg_metrics = {k: np.mean(v) for k, v in epoch_metrics.items()}
+        
+        # Evaluate model
+        if epoch % args.eval_interval == 0:
+            eval_metrics = evaluate_model(cpl_model, dataset)
+            print(f"Epoch {epoch}/{args.num_epochs}: "
+                  f"Loss: {avg_metrics['loss']:.4f}, "
+                  f"Accuracy: {avg_metrics['accuracy']:.4f}, "
+                  f"Eval Accuracy: {eval_metrics['eval_accuracy']:.4f}, "
+                  f"Confidence: {eval_metrics['eval_confidence']:.4f}")
+        else:
+            eval_metrics = {"eval_accuracy": None, "eval_confidence": None}
+            print(f"Epoch {epoch}/{args.num_epochs}: "
+                  f"Loss: {avg_metrics['loss']:.4f}, "
+                  f"Accuracy: {avg_metrics['accuracy']:.4f}")
+        
+        # Record metrics
+        metrics_history["epoch"].append(epoch)
+        for key in ["loss", "accuracy", "mean_chosen_reward", "mean_rejected_reward", "mean_reward_diff"]:
+            metrics_history[key].append(avg_metrics[key])
+        metrics_history["eval_accuracy"].append(eval_metrics["eval_accuracy"])
+        metrics_history["eval_confidence"].append(eval_metrics["eval_confidence"])
+        
+        # Save checkpoint
+        if epoch % args.save_interval == 0:
+            checkpoint_path = output_dir / f"checkpoint_epoch_{epoch:03d}.pkl"
+            cpl_model.save_checkpoint(str(checkpoint_path))
+            print(f"Saved checkpoint to {checkpoint_path}")
+        
+        # Save latest checkpoint
+        latest_path = output_dir / "checkpoint_latest.pkl"
+        cpl_model.save_checkpoint(str(latest_path))
+        
+        # Save metrics
+        with open(output_dir / "metrics.json", 'w') as f:
+            serializable_metrics = convert_to_json_serializable(metrics_history)
+            json.dump(serializable_metrics, f, indent=2)
+        
+        # Plot training curves
+        plot_training_curves(metrics_history, output_dir)
+        
+        # Print epoch time
+        epoch_time = time.time() - epoch_start_time
+        print(f"Epoch {epoch} completed in {epoch_time:.2f}s")
+    
+    # Save final model
+    final_path = output_dir / "checkpoint_final.pkl"
+    cpl_model.save_checkpoint(str(final_path))
+    
+    # Print training summary
+    total_time = time.time() - start_time
+    print(f"Training completed in {total_time:.2f}s")
+    print(f"Final loss: {metrics_history['loss'][-1]:.4f}")
+    print(f"Final accuracy: {metrics_history['accuracy'][-1]:.4f}")
+    
+    if metrics_history["eval_accuracy"][-1] is not None:
+        print(f"Final eval accuracy: {metrics_history['eval_accuracy'][-1]:.4f}")
+        print(f"Final confidence: {metrics_history['eval_confidence'][-1]:.4f}")
+    
+    print(f"Model saved to {final_path}")
+
+
+if __name__ == "__main__":
+    main()

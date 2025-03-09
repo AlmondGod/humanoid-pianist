@@ -2,3 +2,6 @@ models/*
 videos/*
 wandb/*
 __pycache__/*
+preference_data/*
+reward_model/*
+preference_videos/*

@@ -167,7 +167,16 @@ def main(args: Args) -> None:
     env = get_env(args)
     eval_env = get_env(args, record_dir=experiment_dir / "eval")
 
+    # Add these debug lines to print observation dimensions
+    print("=" * 50)
+    timestep = env.reset()
+    print(f"ENVIRONMENT OBSERVATION SHAPE: {timestep.observation.shape}")
+    print(f"OBSERVATION FIRST 10 VALUES: {timestep.observation[:10]}")
+    print("=" * 50)
+
     spec = specs.EnvironmentSpec.make(env)
+    print(f"SPEC OBSERVATION DIM: {spec.observation_dim}")
+    print("=" * 50)
 
     # Initialize agent based on algorithm choice
     if args.algorithm == "sac":
