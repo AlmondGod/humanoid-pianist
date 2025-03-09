@@ -176,6 +176,10 @@ def prefix_dict(prefix: str, d: dict) -> dict:
 
 def finetune(args):
     """Fine-tune the SAC agent using the CPL reward model."""
+
+
+    print("Transition class fields:", Transition.__annotations__ if hasattr(Transition, '__annotations__') else "No annotations found")
+
     # Set seeds
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -585,6 +589,8 @@ class ReplayBuffer:
             next_observations.append(next_timestep.observation)
             dones.append(next_timestep.last())
         
+        dones = np.array(dones)
+        
         # Convert to arrays
         observations = np.array(observations)
         actions = np.array(actions)
@@ -592,13 +598,16 @@ class ReplayBuffer:
         next_observations = np.array(next_observations)
         dones = np.array(dones).astype(np.float32)
         
-        # Create transition object
+        # Fix: Convert to boolean before inverting
+        discounts = (1.0 - dones).astype(np.float32) * 0.8  # Alternative to ~ operator
+        
+        # Create transition object with correct field names
         transition = Transition(
-            observation=observations,
+            state=observations,
             action=actions,
             reward=rewards,
-            next_observation=next_observations,
-            done=dones
+            next_state=next_observations,
+            discount=discounts  # Changed from terminated to discount
         )
         
         return transition
