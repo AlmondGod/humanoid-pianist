@@ -744,30 +744,21 @@ class HybridGRPO:
         policy_loss = -torch.min(surr1, surr2).mean()
         
         # 3. VALUE LOSS
-        value_pred = self.critic(states)  # Shape: [batch_size, 1]
+        value_pred = self.critic(states)
+        next_value_pred = self.critic(next_states)
+        value_target = rewards + self.gamma * discounts * next_value_pred
         
-        # Step 1: First calculate next state values separately
-        next_value_pred = self.critic(next_states)  # Shape: [batch_size, 1]
-        
-        # Step 2: Explicit shape control before calculation
-        if len(rewards.shape) == 1:
-            rewards = rewards.unsqueeze(1)  # Ensure [batch_size, 1]
-        if len(discounts.shape) == 1:
-            discounts = discounts.unsqueeze(1)  # Ensure [batch_size, 1]
-            
-        # Step 3: Controlled calculation with printing for debugging
-        discount_factor = self.gamma * discounts  # Should be [batch_size, 1]
-        future_value = discount_factor * next_value_pred  # Should be [batch_size, 1]
-        value_target = rewards + future_value  # Should be [batch_size, 1]
-        
-        # Step 4: Verify shapes and fix if needed
+        # Ensure shapes match to avoid broadcasting warning
         if value_pred.shape != value_target.shape:
-            print(f"Debug shapes: value_pred {value_pred.shape}, rewards {rewards.shape}, "
-                  f"discounts {discounts.shape}, next_value_pred {next_value_pred.shape}, "
-                  f"value_target {value_target.shape}")
-            
-            # Last resort reshape if shapes still don't match
-            value_target = value_target.view(value_pred.shape)
+            print(f"Shape mismatch: value_pred {value_pred.shape} vs value_target {value_target.shape}")
+            if len(value_pred.shape) == 2 and value_pred.shape[1] == 1:
+                if len(value_target.shape) == 1:
+                    value_target = value_target.unsqueeze(1)
+                elif len(value_target.shape) == 2 and value_target.shape[1] != 1:
+                    if value_target.shape[0] == value_target.shape[1]:
+                        value_target = value_target[:, 0:1]
+                    else:
+                        value_target = value_target.view(value_pred.shape)
             
         value_loss = self.value_coef * nn.MSELoss()(value_pred, value_target.detach())
         
