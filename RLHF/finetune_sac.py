@@ -33,7 +33,7 @@ class Args:
     """Arguments for fine-tuning SAC with CPL rewards."""
     # Checkpoints
     sac_checkpoint: str = "/Users/almondgod/Repositories/robopianist/robopianist-rl/models/CruelAngelsThesismiddle15s/SAC-/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid-42-2025-03-03-21-29-41/checkpoint_00840000.pkl"
-    cpl_checkpoint: str = "/Users/almondgod/Repositories/robopianist/robopianist-rl/reward_model/checkpoint_latest.pkl"
+    cpl_checkpoint: str = "/Users/almondgod/Repositories/robopianist/robopianist-rl/RLHF/reward_models/2025-03-09-17-19-05/checkpoints/checkpoint_final.pkl"
     
     # Environment settings
     midi_file: str = "/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid"
@@ -49,7 +49,7 @@ class Args:
     action_reward_observation: bool = True
     
     # Training settings
-    output_dir: str = "rlhf_models"
+    output_dir: str = "RLHF/finetune_sac_models"  # Base directory for all outputs
     seed: int = 42
     max_steps: int = 500_000
     replay_capacity: int = 1_000_000
@@ -167,9 +167,13 @@ def finetune(args):
     random.seed(args.seed)
     np.random.seed(args.seed)
     
-    # Create output directory
-    experiment_dir = Path(args.output_dir) / f"{args.seed}-{time.strftime('%Y-%m-%d-%H-%M-%S')}"
-    experiment_dir.mkdir(parents=True, exist_ok=True)
+    # Create timestamped directory structure
+    timestamp = time.strftime('%Y-%m-%d-%H-%M-%S')
+    experiment_dir = Path(args.output_dir) / timestamp
+    videos_dir = experiment_dir / "videos"
+    
+    for dir_path in [experiment_dir, videos_dir]:
+        dir_path.mkdir(parents=True, exist_ok=True)
     
     # Initialize wandb for tracking
     if args.use_wandb:
@@ -183,7 +187,7 @@ def finetune(args):
     
     # Create environments
     env = get_env(args)
-    eval_env = get_env(args, record_dir=args.record_dir)
+    eval_env = get_env(args, record_dir=videos_dir)  # Use videos subdirectory
     
     # Add detailed observation debugging
     timestep = env.reset()
@@ -333,13 +337,5 @@ if __name__ == "__main__":
     # Convert string paths to Path objects
     if args.midi_file:
         args.midi_file = Path(args.midi_file)
-    
-    # Create record directory based on checkpoint
-    if args.record_dir is None:
-        checkpoint_name = Path(args.sac_checkpoint).parent.name
-        timestamp = time.strftime('%Y-%m-%d-%H-%M-%S')
-        args.record_dir = Path("finetune_sac_videos") / f"{checkpoint_name}" / f"{timestamp}"
-    else:
-        args.record_dir = Path(args.record_dir)
     
     finetune(args)

@@ -18,6 +18,7 @@ import json
 from typing import List, Dict, Tuple, Optional
 import glob
 import shutil
+from dataclasses import dataclass
 
 import sys
 sys.path.append('.')  # Add the root directory to path
@@ -88,8 +89,7 @@ class PreferenceDataGenerator:
         environment_name: str = None,
         num_episodes: int = 10,
         seed: int = 42,
-        video_dir: str = "preference_videos",
-        data_dir: str = "preference_data",
+        data_dir: str = "RLHF/preference_data",
         algorithm: str = "sac"
     ):
         """
@@ -101,7 +101,6 @@ class PreferenceDataGenerator:
             environment_name: Environment name (if not using MIDI file)
             num_episodes: Number of episodes to roll out
             seed: Random seed
-            video_dir: Directory to save videos
             data_dir: Directory to save preference data
             algorithm: The algorithm used for the agent (sac, qtopt, or hybrid_grpo)
         """
@@ -110,13 +109,32 @@ class PreferenceDataGenerator:
         self.environment_name = environment_name
         self.num_episodes = num_episodes
         self.seed = seed
-        self.video_dir = Path(video_dir)
-        self.data_dir = Path(data_dir)
         self.algorithm = algorithm
         
-        # Create directories
-        self.video_dir.mkdir(parents=True, exist_ok=True)
-        self.data_dir.mkdir(parents=True, exist_ok=True)
+        # Create timestamped directories
+        timestamp = time.strftime('%Y-%m-%d-%H-%M-%S')
+        self.base_data_dir = Path(data_dir)
+        self.data_dir = self.base_data_dir / timestamp
+        
+        # Create subdirectories
+        self.video_dir = self.data_dir / "videos"
+        self.logs_dir = self.data_dir / "logs"
+        
+        for dir_path in [self.video_dir, self.logs_dir]:
+            dir_path.mkdir(parents=True, exist_ok=True)
+        
+        # Save configuration
+        config = {
+            "checkpoint_path": checkpoint_path,
+            "midi_file": midi_file,
+            "environment_name": environment_name,
+            "num_episodes": num_episodes,
+            "seed": seed,
+            "algorithm": algorithm,
+            "timestamp": timestamp
+        }
+        with open(self.logs_dir / "config.json", 'w') as f:
+            json.dump(config, f, indent=2)
         
         # Set random seeds
         random.seed(seed)
@@ -327,7 +345,7 @@ class PreferenceDataGenerator:
     
     def _save_trajectories(self):
         """Save trajectories to disk."""
-        trajectory_path = self.data_dir / "trajectories.pkl"
+        trajectory_path = self.logs_dir / "trajectories.pkl"
         with open(trajectory_path, 'wb') as f:
             pickle.dump({
                 "trajectories": self.trajectories,
@@ -350,7 +368,7 @@ class PreferenceDataGenerator:
             with open(rankings_file, 'r') as f:
                 self.rankings = json.load(f)
         else:
-            rankings_path = self.data_dir / "rankings.json"
+            rankings_path = self.logs_dir / "rankings.json"
             if rankings_path.exists():
                 with open(rankings_path, 'r') as f:
                     self.rankings = json.load(f)
@@ -369,7 +387,7 @@ class PreferenceDataGenerator:
             self.rankings[str(i)] = rank
         
         # Save rankings
-        rankings_path = self.data_dir / "rankings.json"
+        rankings_path = self.logs_dir / "rankings.json"
         with open(rankings_path, 'w') as f:
             json.dump(self.rankings, f)
         print(f"Saved rankings to {rankings_path}")
@@ -401,69 +419,43 @@ class PreferenceDataGenerator:
                 })
         
         # Save preferences
-        preferences_path = self.data_dir / "pairwise_preferences.pkl"
+        preferences_path = self.logs_dir / "pairwise_preferences.pkl"
         with open(preferences_path, 'wb') as f:
             pickle.dump(self.pairwise_preferences, f)
         
         print(f"Generated {len(self.pairwise_preferences)} pairwise preferences")
         print(f"Saved preferences to {preferences_path}")
         
-        # Also save in a format suitable for CPL training
-        self._save_cpl_dataset()
-    
-    def _save_cpl_dataset(self):
-        """Save dataset in a format suitable for CPL training."""
-        cpl_data = []
-        
-        for pref in self.pairwise_preferences:
-            chosen_traj = pref["chosen_trajectory"]
-            rejected_traj = pref["rejected_trajectory"]
-            
-            # Format for CPL
-            cpl_item = {
-                "chosen": {
-                    "observations": chosen_traj["observations"],
-                    "actions": chosen_traj["actions"],
-                    "rewards": chosen_traj["rewards"],
-                },
-                "rejected": {
-                    "observations": rejected_traj["observations"],
-                    "actions": rejected_traj["actions"],
-                    "rewards": rejected_traj["rewards"],
-                },
-                "chosen_return": chosen_traj["return"],
-                "rejected_return": rejected_traj["return"],
-                "chosen_idx": pref["chosen_idx"],
-                "rejected_idx": pref["rejected_idx"]
-            }
-            
-            cpl_data.append(cpl_item)
-        
+        # Save CPL dataset in data_dir root
         cpl_path = self.data_dir / "cpl_dataset.pkl"
         with open(cpl_path, 'wb') as f:
-            pickle.dump(cpl_data, f)
+            pickle.dump(self.pairwise_preferences, f)
         
         print(f"Saved CPL dataset to {cpl_path}")
 
+@dataclass
+class Args:
+    """Arguments for generating preference data."""
+    # Model checkpoint
+    checkpoint: str = "/Users/almondgod/Repositories/robopianist/robopianist-rl/models/CruelAngelsThesismiddle15s/SAC-/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid-42-2025-03-03-21-29-41/checkpoint_00920000.pkl"
+    
+    # Environment settings
+    midi_file: str = "/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid"
+    environment_name: Optional[str] = None
+    
+    # Data collection settings
+    num_episodes: int = 10
+    seed: int = 42
+    data_dir: str = "preference_data"
+    algorithm: str = "sac"  # choices: ["sac", "qtopt", "hybrid_grpo"]
+    
+    # Optional settings
+    rankings_file: Optional[str] = None
+    generate_only: bool = False
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Generate preference data for RLHF")
-    parser.add_argument("--checkpoint", type=str, 
-        default="/Users/almondgod/Repositories/robopianist/robopianist-rl/models/CruelAngelsThesismiddle15s/SAC-/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid-42-2025-03-03-21-29-41/checkpoint_00920000.pkl", 
-        help="Path to agent checkpoint")
-    parser.add_argument("--midi_file", type=str, 
-        default="/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid", 
-        help="Path to MIDI file")
-    parser.add_argument("--environment_name", type=str, default=None, help="Environment name (if not using MIDI)")
-    parser.add_argument("--num_episodes", type=int, default=10, help="Number of episodes to roll out")
-    parser.add_argument("--seed", type=int, default=42, help="Random seed")
-    parser.add_argument("--video_dir", type=str, default="preference_videos", help="Directory to save videos")
-    parser.add_argument("--data_dir", type=str, default="preference_data", help="Directory to save preference data")
-    parser.add_argument("--algorithm", type=str, default="sac", choices=["sac", "qtopt", "hybrid_grpo"], 
-                        help="Algorithm used by the agent")
-    parser.add_argument("--rankings_file", type=str, default=None, help="Path to JSON file with rankings")
-    parser.add_argument("--generate_only", action="store_true", help="Only generate episodes without ranking")
-    args = parser.parse_args()
+    import tyro
+    args = tyro.cli(Args)
     
     # Create generator
     generator = PreferenceDataGenerator(
@@ -472,7 +464,6 @@ if __name__ == "__main__":
         environment_name=args.environment_name,
         num_episodes=args.num_episodes,
         seed=args.seed,
-        video_dir=args.video_dir,
         data_dir=args.data_dir,
         algorithm=args.algorithm
     )

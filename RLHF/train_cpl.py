@@ -22,11 +22,11 @@ from RLHF.cpl import CPL, CPLConfig
 class Args:
     """Arguments for training CPL reward model."""
     # Dataset arguments
-    data_dir: str = "preference_data"
+    data_dir: str = "RLHF/preference_data"
     dataset: str = "cpl_dataset.pkl"
     
     # Training arguments
-    output_dir: str = "reward_model"
+    output_dir: str = "RLHF/reward_models"
     num_epochs: int = 100
     batch_size: int = 64
     learning_rate: float = 3e-4

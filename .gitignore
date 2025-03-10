@@ -2,8 +2,6 @@ models/*
 videos/*
 wandb/*
 __pycache__
-preference_data/*
-reward_model/*
-preference_videos/*
-finetune_sac_videos/*
-rlhf_models/*
+RLHF/preference_data/*
+RLHF/finetune_sac_models/*
+RLHF/reward_models/*
