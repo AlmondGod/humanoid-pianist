@@ -19,7 +19,7 @@ sys.path.append('.')  # Add the root directory to path
 # Import necessary modules
 from sac import SAC, SACConfig
 from specs import EnvironmentSpec
-from replay import Transition  # Only import Transition
+from replay import Buffer, Transition  # Import both
 from RLHF.cpl import CPL, CPLConfig
 
 # Environment imports
@@ -32,7 +32,7 @@ from cpl_reward_wrapper import CPLRewardWrapper
 class Args:
     """Arguments for fine-tuning SAC with CPL rewards."""
     # Checkpoints
-    sac_checkpoint: str = "/Users/almondgod/Repositories/robopianist/robopianist-rl/models/CruelAngelsThesismiddle15s/SAC-/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid-42-2025-03-02-12-40-35/checkpoint_00680000.pkl"
+    sac_checkpoint: str = "/Users/almondgod/Repositories/robopianist/robopianist-rl/models/CruelAngelsThesismiddle15s/SAC-/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid-42-2025-03-03-21-29-41/checkpoint_00840000.pkl"
     cpl_checkpoint: str = "/Users/almondgod/Repositories/robopianist/robopianist-rl/reward_model/checkpoint_latest.pkl"
     
     # Environment settings
@@ -54,8 +54,8 @@ class Args:
     max_steps: int = 500_000
     replay_capacity: int = 1_000_000
     batch_size: int = 256
-    log_interval: int = 10000
-    eval_interval: int = 40000
+    log_interval: int = 1000
+    eval_interval: int = 1000
     eval_episodes: int = 1
     tqdm_bar: bool = True
     
@@ -199,10 +199,11 @@ def finetune(args):
     original_spec = EnvironmentSpec.make(env)
     
     # Create replay buffer
-    replay_buffer = ReplayBuffer(
-        capacity=args.replay_capacity,
+    replay_buffer = Buffer(
+        state_dim=original_spec.observation_dim,
+        action_dim=original_spec.action_dim,
+        max_size=args.replay_capacity,
         batch_size=args.batch_size,
-        spec=original_spec
     )
     
     # Load pretrained SAC agent
@@ -325,104 +326,6 @@ def finetune(args):
     if args.use_wandb:
         wandb.finish()
 
-# Define ReplayBuffer here
-class ReplayBuffer:
-    """Replay buffer for off-policy reinforcement learning."""
-    
-    def __init__(self, capacity: int, batch_size: int, spec: EnvironmentSpec):
-        """Initialize replay buffer.
-        
-        Args:
-            capacity: Maximum number of transitions to store
-            batch_size: Batch size for sampling
-            spec: Environment specification
-        """
-        self.capacity = capacity
-        self.batch_size = batch_size
-        self.spec = spec
-        
-        # Initialize buffer
-        self.storage = collections.deque(maxlen=capacity)
-        self.current_episode = []
-        self.num_episodes = 0
-    
-    def insert(self, timestep, action):
-        """Insert a transition into the replay buffer."""
-        if timestep.first():
-            # Start a new episode
-            self.current_episode = []
-            
-        if action is not None:
-            # Store step in current episode
-            self.current_episode.append((timestep, action))
-        
-        if timestep.last():
-            # End of episode, store the episode
-            if len(self.current_episode) > 0:
-                self.storage.append(self.current_episode)
-                self.num_episodes += 1
-            self.current_episode = []
-    
-    def sample(self):
-        """Sample a batch of transitions for training."""
-        # Sample episode indices
-        episode_indices = np.random.randint(0, len(self.storage), self.batch_size)
-        
-        # Get batch of transitions
-        observations = []
-        actions = []
-        rewards = []
-        next_observations = []
-        dones = []
-        
-        for idx in episode_indices:
-            episode = self.storage[idx]
-            if len(episode) <= 1:
-                continue
-                
-            # Sample a random transition from the episode
-            transition_idx = np.random.randint(0, len(episode) - 1)
-            
-            # Get current timestep and action
-            current_timestep, action = episode[transition_idx]
-            
-            # Get next timestep
-            next_timestep, _ = episode[transition_idx + 1]
-            
-            # Store transition data
-            observations.append(current_timestep.observation)
-            actions.append(action)
-            rewards.append(next_timestep.reward)
-            next_observations.append(next_timestep.observation)
-            dones.append(next_timestep.last())
-        
-        dones = np.array(dones)
-        
-        # Convert to arrays
-        observations = np.array(observations)
-        actions = np.array(actions)
-        rewards = np.array(rewards)
-        next_observations = np.array(next_observations)
-        dones = np.array(dones).astype(np.float32)
-        
-        # Fix: Convert to boolean before inverting
-        discounts = (1.0 - dones).astype(np.float32) * 0.8  # Alternative to ~ operator
-        
-        # Create transition object with correct field names
-        transition = Transition(
-            state=observations,
-            action=actions,
-            reward=rewards,
-            next_state=next_observations,
-            discount=discounts  # Changed from terminated to discount
-        )
-        
-        return transition
-    
-    def is_ready(self):
-        """Check if the buffer has enough data for training."""
-        return len(self.storage) >= 1 and self.num_episodes >= 1
-    
 if __name__ == "__main__":
     import tyro
     args = tyro.cli(Args)
