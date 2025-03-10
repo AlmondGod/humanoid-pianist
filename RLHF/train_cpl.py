@@ -11,55 +11,38 @@ import matplotlib.pyplot as plt
 from typing import List, Dict, Tuple, Any, Optional, Sequence
 from dataclasses import dataclass
 import json
+import tyro
 
 import sys
 sys.path.append('.')  # Add the root directory to path
 
 from RLHF.cpl import CPL, CPLConfig
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Train a reward model with Contrastive Preference Learning")
-    
+@dataclass
+class Args:
+    """Arguments for training CPL reward model."""
     # Dataset arguments
-    parser.add_argument("--data_dir", type=str, default="preference_data", 
-                        help="Directory with preference data")
-    parser.add_argument("--dataset", type=str, default="cpl_dataset.pkl",
-                        help="Filename of CPL dataset within data_dir")
+    data_dir: str = "preference_data"
+    dataset: str = "cpl_dataset.pkl"
     
     # Training arguments
-    parser.add_argument("--output_dir", type=str, default="reward_model", 
-                        help="Directory to save model checkpoints")
-    parser.add_argument("--num_epochs", type=int, default=100, 
-                        help="Number of training epochs")
-    parser.add_argument("--batch_size", type=int, default=64, 
-                        help="Batch size for training")
-    parser.add_argument("--learning_rate", type=float, default=3e-4, 
-                        help="Learning rate")
-    parser.add_argument("--weight_decay", type=float, default=1e-4, 
-                        help="Weight decay for regularization")
-    parser.add_argument("--dropout_rate", type=float, default=0.1, 
-                        help="Dropout rate")
-    parser.add_argument("--conservative_weight", type=float, default=0.0, 
-                        help="Weight for conservative regularization")
-    parser.add_argument("--grad_clip", type=float, default=1.0, 
-                        help="Gradient clipping threshold")
-    parser.add_argument("--seed", type=int, default=42, 
-                        help="Random seed")
-    parser.add_argument("--eval_interval", type=int, default=5, 
-                        help="Evaluate every N epochs")
-    parser.add_argument("--save_interval", type=int, default=10, 
-                        help="Save checkpoint every N epochs")
+    output_dir: str = "reward_model"
+    num_epochs: int = 100
+    batch_size: int = 64
+    learning_rate: float = 3e-4
+    weight_decay: float = 1e-4
+    dropout_rate: float = 0.1
+    conservative_weight: float = 0.0
+    grad_clip: float = 1.0
+    seed: int = 42
+    eval_interval: int = 5
+    save_interval: int = 10
     
     # Model architecture
-    parser.add_argument("--hidden_dims", type=str, default="256,256,256", 
-                        help="Hidden dimensions of reward model")
+    hidden_dims: str = "256,256,256"
     
     # Resume training
-    parser.add_argument("--resume", type=str, default=None, 
-                        help="Path to checkpoint to resume training from")
-    
-    return parser.parse_args()
-
+    resume: Optional[str] = None
 
 def load_dataset(data_path: str):
     """Load CPL dataset."""
@@ -153,13 +136,9 @@ def evaluate_model(model, dataset, num_samples=100):
     }
 
 
-def plot_training_curves(metrics_history, output_dir):
+def plot_training_curves(metrics_history, plots_dir):
     """Plot training curves."""
-    output_dir = Path(output_dir)
-    
-    # Create plots directory
-    plots_dir = output_dir / "plots"
-    plots_dir.mkdir(exist_ok=True, parents=True)
+    plots_dir = Path(plots_dir)  # Ensure it's a Path object
     
     # Plot loss
     plt.figure(figsize=(10, 6))
@@ -218,18 +197,27 @@ def convert_to_json_serializable(obj):
 
 
 def main():
-    args = parse_args()
+    args = tyro.cli(Args)
     
     # Set random seeds
     random.seed(args.seed)
     np.random.seed(args.seed)
     
-    # Create output directory
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    # Create timestamped output directory
+    timestamp = time.strftime('%Y-%m-%d-%H-%M-%S')
+    base_output_dir = Path(args.output_dir)
+    output_dir = base_output_dir / timestamp
+    
+    # Create subdirectories
+    checkpoints_dir = output_dir / "checkpoints"
+    plots_dir = output_dir / "plots"
+    logs_dir = output_dir / "logs"
+    
+    for dir_path in [checkpoints_dir, plots_dir, logs_dir]:
+        dir_path.mkdir(parents=True, exist_ok=True)
     
     # Save args
-    with open(output_dir / "args.json", 'w') as f:
+    with open(logs_dir / "args.json", 'w') as f:
         json.dump(vars(args), f, indent=2)
     
     # Load dataset
@@ -337,28 +325,28 @@ def main():
         
         # Save checkpoint
         if epoch % args.save_interval == 0:
-            checkpoint_path = output_dir / f"checkpoint_epoch_{epoch:03d}.pkl"
+            checkpoint_path = checkpoints_dir / f"checkpoint_epoch_{epoch:03d}.pkl"
             cpl_model.save_checkpoint(str(checkpoint_path))
             print(f"Saved checkpoint to {checkpoint_path}")
         
         # Save latest checkpoint
-        latest_path = output_dir / "checkpoint_latest.pkl"
+        latest_path = checkpoints_dir / "checkpoint_latest.pkl"
         cpl_model.save_checkpoint(str(latest_path))
         
         # Save metrics
-        with open(output_dir / "metrics.json", 'w') as f:
+        with open(logs_dir / "metrics.json", 'w') as f:
             serializable_metrics = convert_to_json_serializable(metrics_history)
             json.dump(serializable_metrics, f, indent=2)
         
         # Plot training curves
-        plot_training_curves(metrics_history, output_dir)
+        plot_training_curves(metrics_history, plots_dir)
         
         # Print epoch time
         epoch_time = time.time() - epoch_start_time
         print(f"Epoch {epoch} completed in {epoch_time:.2f}s")
     
     # Save final model
-    final_path = output_dir / "checkpoint_final.pkl"
+    final_path = checkpoints_dir / "checkpoint_final.pkl"
     cpl_model.save_checkpoint(str(final_path))
     
     # Print training summary
