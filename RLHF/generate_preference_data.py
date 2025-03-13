@@ -18,7 +18,7 @@ import json
 from typing import List, Dict, Tuple, Optional
 import glob
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import sys
 sys.path.append('.')  # Add the root directory to path
@@ -81,33 +81,54 @@ def get_env(args, record_dir=None):
     
     return env
 
+@dataclass
+class Args:
+    """Arguments for generating preference data."""
+    # Model checkpoints
+    checkpoints: List[str] = field(default_factory=lambda: [
+        "/Users/almondgod/Repositories/robopianist/robopianist-rl/models/CruelAngelsThesismiddle15s/SAC-/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid-42-2025-03-03-21-29-41/checkpoint_00920000.pkl",
+        "/Users/almondgod/Repositories/robopianist/robopianist-rl/models/CruelAngelsThesismiddle15s/SAC-/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid-42-2025-03-02-12-40-35/checkpoint_00320000.pkl",
+        "/Users/almondgod/Repositories/robopianist/robopianist-rl/models/CruelAngelsThesismiddle15s/SAC-/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid-42-2025-02-28-21-38-57/checkpoint_00640000.pkl",
+        "/Users/almondgod/Repositories/robopianist/robopianist-rl/models/CruelAngelsThesismiddle15s/SAC-/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid-42-2025-03-01-10-57-51/checkpoint_00480000.pkl",
+        "/Users/almondgod/Repositories/robopianist/robopianist-rl/models/CruelAngelsThesismiddle15s/SAC-/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid-42-2025-03-03-09-53-14/checkpoint_00560000.pkl"
+    ])
+    
+    # Noise settings
+    noise_scales: List[float] = field(default_factory=lambda: [0.0, 0.05, 0.1, 0.15,0.2])  # Start with no noise
+    
+    # Environment settings
+    midi_file: str = "/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid"
+    environment_name: Optional[str] = None
+    
+    # Data collection settings
+    episodes_per_config: int = 3  # Number of episodes per checkpoint-noise combination
+    seed: int = 42
+    data_dir: str = "RLHF/preference_data"
+    algorithm: str = "sac"
+    
+    # Optional settings
+    rankings_file: Optional[str] = None
+    generate_only: bool = False
+
 class PreferenceDataGenerator:
     def __init__(
         self,
-        checkpoint_path: str,
+        checkpoints: List[str],
+        noise_scales: List[float],
         midi_file: str = None,
         environment_name: str = None,
-        num_episodes: int = 10,
+        episodes_per_config: int = 3,
         seed: int = 42,
         data_dir: str = "RLHF/preference_data",
         algorithm: str = "sac"
     ):
-        """
-        Initialize the preference data generator.
-        
-        Args:
-            checkpoint_path: Path to the pretrained agent checkpoint
-            midi_file: Path to MIDI file (if using a specific piece)
-            environment_name: Environment name (if not using MIDI file)
-            num_episodes: Number of episodes to roll out
-            seed: Random seed
-            data_dir: Directory to save preference data
-            algorithm: The algorithm used for the agent (sac, qtopt, or hybrid_grpo)
-        """
-        self.checkpoint_path = checkpoint_path
+        """Initialize the preference data generator."""
+        self.checkpoints = checkpoints
+        self.noise_scales = noise_scales
         self.midi_file = midi_file
         self.environment_name = environment_name
-        self.num_episodes = num_episodes
+        self.episodes_per_config = episodes_per_config
+        self.total_episodes = len(checkpoints) * len(noise_scales) * episodes_per_config
         self.seed = seed
         self.algorithm = algorithm
         
@@ -125,10 +146,11 @@ class PreferenceDataGenerator:
         
         # Save configuration
         config = {
-            "checkpoint_path": checkpoint_path,
+            "checkpoints": checkpoints,
+            "noise_scales": noise_scales,
             "midi_file": midi_file,
             "environment_name": environment_name,
-            "num_episodes": num_episodes,
+            "episodes_per_config": episodes_per_config,
             "seed": seed,
             "algorithm": algorithm,
             "timestamp": timestamp
@@ -178,159 +200,123 @@ class PreferenceDataGenerator:
         # Get environment spec
         self.spec = EnvironmentSpec.make(self.env)
         
-        # Load checkpoint
-        print(f"Loading checkpoint from {self.checkpoint_path}")
-        with open(self.checkpoint_path, 'rb') as f:
-            self.checkpoint = pickle.load(f)
-        
-        # Initialize agent
-        if self.algorithm == "sac":
-            config = SACConfig(
-                hidden_dims=(256, 256, 256),
-                critic_dropout_rate=0.01,
-                critic_layer_norm=True
-            )
-            self.agent = SAC.initialize(
-                spec=self.spec,
-                config=config,
-                seed=self.seed,
-                discount=0.8,
-            )
-            # Load checkpoint
-            self.agent = self.agent.replace(
-                actor=self.agent.actor.replace(params=self.checkpoint['params']),
-                critic=self.agent.critic.replace(params=self.checkpoint['critic_params']),
-                target_critic=self.agent.target_critic.replace(params=self.checkpoint['target_critic_params']),
-                temp=self.agent.temp.replace(params=self.checkpoint['temp_params'])
-            )
-        elif self.algorithm == "qtopt":
-            from qtopt import QTOpt, QTOptConfig
-            config = QTOptConfig(
-                hidden_dims=(256, 256, 256),
-            )
-            self.agent = QTOpt.initialize(
-                spec=self.spec,
-                config=config,
-                seed=self.seed,
-                discount=0.8,
-            )
-            # Load checkpoint (QTOpt has no actor or temp)
-            self.agent = self.agent.replace(
-                critic=self.agent.critic.replace(params=self.checkpoint.get('critic_params', self.checkpoint.get('params'))),
-                target_critic=self.agent.target_critic.replace(params=self.checkpoint.get('target_critic_params', self.checkpoint.get('params')))
-            )
-        else:
-            # For hybrid_grpo (PyTorch based)
-            from hybrid_grpo import HybridGRPO
-            self.agent = HybridGRPO(
-                state_dim=self.spec.observation_dim,
-                action_dim=self.spec.action_dim,
-                hidden_dims=(256, 256, 256),
-                lr=3e-4,
-                gamma=0.8,
-                num_samples=8,
-                clip_param=0.2,
-                value_coef=0.5,
-                entropy_coef=0.01,
-                max_workers=1,
-                mini_batch_size=32,
-            )
-            # Load PyTorch checkpoint
-            self.agent.actor.load_state_dict(self.checkpoint['actor_state_dict'])
-            self.agent.critic.load_state_dict(self.checkpoint['critic_state_dict'])
-            self.agent.actor_optimizer.load_state_dict(self.checkpoint['actor_optimizer_state_dict'])
-            self.agent.critic_optimizer.load_state_dict(self.checkpoint['critic_optimizer_state_dict'])
-            self.agent.set_env(self.env)
+        # Don't load agent here anymore since we'll load per checkpoint
+        self.env = get_env(self.env_args, record_dir=self.video_dir)
+        self.spec = EnvironmentSpec.make(self.env)
     
     def generate_episodes(self):
-        """Generate episodes and record videos."""
-        print(f"Generating {self.num_episodes} episodes...")
-        
-        # Clear previous videos
-        for video_file in self.video_dir.glob("*.mp4"):
-            video_file.unlink()
-        
-        self.trajectories = []
+        """Generate episodes from multiple checkpoints with varying noise."""
+        episode_idx = 0
         self.video_paths = []
-        
-        for episode_idx in range(self.num_episodes):
-            print(f"Rolling out episode {episode_idx+1}/{self.num_episodes}")
+        self.trajectories = []
+        self.config_info = []  # Store which checkpoint and noise level was used
+
+        for checkpoint_path in self.checkpoints:
+            print(f"\nUsing checkpoint: {checkpoint_path}")
             
-            # Reset env and initialize trajectory storage
-            timestep = self.env.reset()
-            trajectory = {
-                "observations": [],
-                "actions": [],
-                "rewards": [],
-                "next_observations": [],
-                "dones": [],
-                "infos": []
-            }
+            # Load checkpoint
+            with open(checkpoint_path, 'rb') as f:
+                sac_checkpoint = pickle.load(f)
             
-            # Store initial observation
-            trajectory["observations"].append(timestep.observation)
+            # Initialize SAC agent
+            sac_config = SACConfig(
+                hidden_dims=(256, 256, 256),
+                critic_dropout_rate=0.01,
+                critic_layer_norm=True,
+            )
+            agent = SAC.initialize(self.spec, sac_config, seed=self.seed)
             
-            # Roll out episode
-            episode_return = 0
-            while not timestep.last():
-                # Get action from agent
-                if self.algorithm == "hybrid_grpo":
-                    action = self.agent.select_action(timestep.observation)
-                else:
-                    action = self.agent.eval_actions(timestep.observation)
+            # Load parameters
+            agent = agent.replace(
+                actor=agent.actor.replace(params=sac_checkpoint['params']),
+                critic=agent.critic.replace(params=sac_checkpoint['critic_params']),
+                target_critic=agent.target_critic.replace(params=sac_checkpoint['target_critic_params']),
+                temp=agent.temp.replace(params=sac_checkpoint['temp_params'])
+            )
+
+            for noise_scale in self.noise_scales:
+                print(f"\nUsing noise scale: {noise_scale}")
                 
-                # Take action in environment
-                next_timestep = self.env.step(action)
-                
-                # Store transition
-                trajectory["actions"].append(action)
-                trajectory["rewards"].append(next_timestep.reward)
-                trajectory["next_observations"].append(next_timestep.observation)
-                trajectory["dones"].append(next_timestep.last())
-                
-                if not next_timestep.last():
-                    trajectory["observations"].append(next_timestep.observation)
-                
-                # Update episode return
-                episode_return += next_timestep.reward
-                
-                # Update timestep
-                timestep = next_timestep
-            
-            # Get the video file path (most recent file in the directory)
-            video_files = sorted(self.video_dir.glob("*.mp4"), key=os.path.getctime)
-            if video_files:
-                latest_video = video_files[-1]
-                # Rename to include episode number
-                new_name = self.video_dir / f"episode_{episode_idx:03d}.mp4"
-                shutil.move(latest_video, new_name)
-                self.video_paths.append(str(new_name))
-            else:
-                print(f"Warning: No video found for episode {episode_idx}")
-                self.video_paths.append(None)
-            
-            # Convert trajectory lists to numpy arrays
-            for key in trajectory:
-                trajectory[key] = np.array(trajectory[key])
-            
-            # Add episode stats
-            trajectory["return"] = episode_return
-            trajectory["info"] = self.env.get_statistics()
-            trajectory["musical_metrics"] = self.env.get_musical_metrics()
-            trajectory["video_path"] = self.video_paths[-1]
-            
-            # Store trajectory
-            self.trajectories.append(trajectory)
-            
-            # Print episode stats
-            print(f"Episode {episode_idx+1} return: {episode_return:.2f}")
-            print(f"Episode stats: {trajectory['info']}")
-            print(f"Musical metrics: {trajectory['musical_metrics']}")
-            print(f"Video saved to: {self.video_paths[-1]}")
-            print("-" * 50)
-        
-        # Save trajectories
-        self._save_trajectories()
+                for _ in range(self.episodes_per_config):
+                    # Roll out episode with noise
+                    trajectory = {
+                        "observations": [],
+                        "actions": [],
+                        "rewards": [],
+                        "next_observations": [],
+                        "dones": []
+                    }
+                    
+                    timestep = self.env.reset()
+                    episode_return = 0
+                    
+                    while not timestep.last():
+                        # Get action from policy
+                        action = agent.eval_actions(timestep.observation)
+                        
+                        # Add noise to action
+                        if noise_scale > 0:
+                            noise = np.random.normal(0, noise_scale, size=action.shape)
+                            action = np.clip(action + noise, -1, 1)
+                        
+                        # Step environment
+                        next_timestep = self.env.step(action)
+                        
+                        # Store transition
+                        trajectory["observations"].append(timestep.observation)
+                        trajectory["actions"].append(action)
+                        trajectory["rewards"].append(next_timestep.reward)
+                        trajectory["next_observations"].append(next_timestep.observation)
+                        trajectory["dones"].append(next_timestep.last())
+                        
+                        episode_return += next_timestep.reward
+                        timestep = next_timestep
+
+                    # Store episode info
+                    self.config_info.append({
+                        "episode_idx": episode_idx,
+                        "checkpoint": checkpoint_path,
+                        "noise_scale": noise_scale,
+                        "return": episode_return
+                    })
+                    
+                    # Get the video file path (most recent file in the directory)
+                    video_files = sorted(self.video_dir.glob("*.mp4"), key=os.path.getctime)
+                    if video_files:
+                        latest_video = video_files[-1]
+                        # Rename to include episode number
+                        new_name = self.video_dir / f"episode_{episode_idx:03d}.mp4"
+                        shutil.move(latest_video, new_name)
+                        self.video_paths.append(str(new_name))
+                    else:
+                        print(f"Warning: No video found for episode {episode_idx}")
+                        self.video_paths.append(None)
+                    
+                    # Convert trajectory lists to numpy arrays
+                    for key in trajectory:
+                        trajectory[key] = np.array(trajectory[key])
+                    
+                    # Add episode stats
+                    trajectory["return"] = episode_return
+                    trajectory["info"] = self.env.get_statistics()
+                    trajectory["musical_metrics"] = self.env.get_musical_metrics()
+                    trajectory["video_path"] = self.video_paths[-1]
+                    
+                    # Store trajectory
+                    self.trajectories.append(trajectory)
+                    
+                    # Print episode stats
+                    print(f"Episode {episode_idx+1} return: {episode_return:.2f}")
+                    print(f"Episode stats: {trajectory['info']}")
+                    print(f"Musical metrics: {trajectory['musical_metrics']}")
+                    print(f"Video saved to: {self.video_paths[-1]}")
+                    print("-" * 50)
+                    
+                    episode_idx += 1
+
+        # Save config info
+        with open(self.logs_dir / "episode_configs.json", 'w') as f:
+            json.dump(self.config_info, f, indent=2)
         
         # Generate command to view videos
         print("\nTo view all videos for ranking, run:")
@@ -382,8 +368,8 @@ class PreferenceDataGenerator:
         print("After viewing the videos, enter the ranking for each episode.")
         
         self.rankings = {}
-        for i in range(self.num_episodes):
-            rank = int(input(f"Rank for episode {i} (1 is best): "))
+        for i in range(self.total_episodes):
+            rank = int(input(f"Rank for episode {i+1} (1 is best): "))
             self.rankings[str(i)] = rank
         
         # Save rankings
@@ -433,36 +419,17 @@ class PreferenceDataGenerator:
         
         print(f"Saved CPL dataset to {cpl_path}")
 
-@dataclass
-class Args:
-    """Arguments for generating preference data."""
-    # Model checkpoint
-    checkpoint: str = "/Users/almondgod/Repositories/robopianist/robopianist-rl/models/CruelAngelsThesismiddle15s/SAC-/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid-42-2025-03-03-21-29-41/checkpoint_00920000.pkl"
-    
-    # Environment settings
-    midi_file: str = "/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid"
-    environment_name: Optional[str] = None
-    
-    # Data collection settings
-    num_episodes: int = 10
-    seed: int = 42
-    data_dir: str = "preference_data"
-    algorithm: str = "sac"  # choices: ["sac", "qtopt", "hybrid_grpo"]
-    
-    # Optional settings
-    rankings_file: Optional[str] = None
-    generate_only: bool = False
-
 if __name__ == "__main__":
     import tyro
     args = tyro.cli(Args)
     
     # Create generator
     generator = PreferenceDataGenerator(
-        checkpoint_path=args.checkpoint,
+        checkpoints=args.checkpoints,
+        noise_scales=args.noise_scales,
         midi_file=args.midi_file,
         environment_name=args.environment_name,
-        num_episodes=args.num_episodes,
+        episodes_per_config=args.episodes_per_config,
         seed=args.seed,
         data_dir=args.data_dir,
         algorithm=args.algorithm
