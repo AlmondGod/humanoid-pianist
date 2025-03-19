@@ -12,6 +12,7 @@ from typing import List, Dict, Tuple, Any, Optional, Sequence
 from dataclasses import dataclass
 import json
 import tyro
+from tqdm import tqdm, trange  # Add this import at the top
 
 import sys
 sys.path.append('.')  # Add the root directory to path
@@ -22,12 +23,12 @@ from RLHF.cpl import CPL, CPLConfig
 class Args:
     """Arguments for training CPL reward model."""
     # Dataset arguments
-    data_dir: str = "RLHF/preference_data"
+    data_dir: str = "RLHF/preference_data/2025-03-13-00-24-50"
     dataset: str = "cpl_dataset.pkl"
     
     # Training arguments
     output_dir: str = "RLHF/reward_models"
-    num_epochs: int = 100
+    num_epochs: int = 10000
     batch_size: int = 64
     learning_rate: float = 3e-4
     weight_decay: float = 1e-4
@@ -35,8 +36,8 @@ class Args:
     conservative_weight: float = 0.0
     grad_clip: float = 1.0
     seed: int = 42
-    eval_interval: int = 5
-    save_interval: int = 10
+    eval_interval: int = 100
+    save_interval: int = 500
     
     # Model architecture
     hidden_dims: str = "256,256,256"
@@ -266,18 +267,14 @@ def main():
     print(f"Starting training for {args.num_epochs} epochs...")
     start_time = time.time()
     
+    pbar = tqdm(total=args.num_epochs, desc="Training")
     for epoch in range(1, args.num_epochs + 1):
         epoch_start_time = time.time()
         
         # Create batches
         indices = np.arange(len(dataset))
         np.random.shuffle(indices)
-        
-        # Split into batches
-        batches = [
-            indices[i:i+args.batch_size] 
-            for i in range(0, len(indices), args.batch_size)
-        ]
+        batches = [indices[i:i+args.batch_size] for i in range(0, len(indices), args.batch_size)]
         
         # Train on batches
         epoch_metrics = {
@@ -302,19 +299,16 @@ def main():
         # Compute average metrics for epoch
         avg_metrics = {k: np.mean(v) for k, v in epoch_metrics.items()}
         
-        # Evaluate model
+        # Evaluate model and update progress bar description
         if epoch % args.eval_interval == 0:
             eval_metrics = evaluate_model(cpl_model, dataset)
-            print(f"Epoch {epoch}/{args.num_epochs}: "
-                  f"Loss: {avg_metrics['loss']:.4f}, "
-                  f"Accuracy: {avg_metrics['accuracy']:.4f}, "
-                  f"Eval Accuracy: {eval_metrics['eval_accuracy']:.4f}, "
-                  f"Confidence: {eval_metrics['eval_confidence']:.4f}")
+            pbar.set_description(f"Loss: {avg_metrics['loss']:.4f}, Acc: {avg_metrics['accuracy']:.4f}, Eval Acc: {eval_metrics['eval_accuracy']:.4f}")
         else:
             eval_metrics = {"eval_accuracy": None, "eval_confidence": None}
-            print(f"Epoch {epoch}/{args.num_epochs}: "
-                  f"Loss: {avg_metrics['loss']:.4f}, "
-                  f"Accuracy: {avg_metrics['accuracy']:.4f}")
+            pbar.set_description(f"Loss: {avg_metrics['loss']:.4f}, Acc: {avg_metrics['accuracy']:.4f}")
+        
+        # Update progress bar
+        pbar.update(1)
         
         # Record metrics
         metrics_history["epoch"].append(epoch)
@@ -343,7 +337,9 @@ def main():
         
         # Print epoch time
         epoch_time = time.time() - epoch_start_time
-        print(f"Epoch {epoch} completed in {epoch_time:.2f}s")
+        # print(f"Epoch {epoch} completed in {epoch_time:.2f}s")
+    
+    pbar.close()
     
     # Save final model
     final_path = checkpoints_dir / "checkpoint_final.pkl"

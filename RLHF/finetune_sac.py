@@ -33,7 +33,7 @@ class Args:
     """Arguments for fine-tuning SAC with CPL rewards."""
     # Checkpoints
     sac_checkpoint: str = "/Users/almondgod/Repositories/robopianist/robopianist-rl/models/CruelAngelsThesismiddle15s/SAC-/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid-42-2025-03-03-21-29-41/checkpoint_00840000.pkl"
-    cpl_checkpoint: str = "/Users/almondgod/Repositories/robopianist/robopianist-rl/RLHF/reward_models/2025-03-09-17-19-05/checkpoints/checkpoint_final.pkl"
+    cpl_checkpoint: str = "/Users/almondgod/Repositories/robopianist/robopianist-rl/RLHF/reward_models/2025-03-13-00-37-12/checkpoints/checkpoint_epoch_10000.pkl"
     
     # Environment settings
     midi_file: str = "/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid"
@@ -66,8 +66,8 @@ class Args:
     record_resolution: tuple = (480, 640)
     
     # RLHF specific settings
-    reward_scale: float = 1.0
-    original_reward_weight: float = 0.0
+    reward_scale: float = 0
+    original_reward_weight: float = 1.0
     
     # Wandb settings
     use_wandb: bool = False
@@ -218,6 +218,10 @@ def finetune(args):
         hidden_dims=(256, 256, 256),
         critic_dropout_rate=0.01,
         critic_layer_norm=True,
+        actor_lr=1e-5,  # Default is 3e-4, lower for more conservative updates
+        critic_lr=1e-5,  # Default is 3e-4
+        temp_lr=1e-5,   # Default is 3e-4
+        tau=0.001,  # Controls how fast target network updates (smaller = slower/more stable)
     )
     
     agent = SAC.initialize(

@@ -101,7 +101,7 @@ class Args:
     environment_name: Optional[str] = None
     
     # Data collection settings
-    episodes_per_config: int = 3  # Number of episodes per checkpoint-noise combination
+    episodes_per_config: int = 1  # Number of episodes per checkpoint-noise combination
     seed: int = 42
     data_dir: str = "RLHF/preference_data"
     algorithm: str = "sac"
@@ -117,7 +117,7 @@ class PreferenceDataGenerator:
         noise_scales: List[float],
         midi_file: str = None,
         environment_name: str = None,
-        episodes_per_config: int = 3,
+        episodes_per_config: int = 1,
         seed: int = 42,
         data_dir: str = "RLHF/preference_data",
         algorithm: str = "sac"
@@ -343,68 +343,104 @@ class PreferenceDataGenerator:
             }, f)
         print(f"Saved trajectories to {trajectory_path}")
     
-    def load_rankings(self, rankings_file: str = None):
+    def load_ratings(self, ratings_file: str = None):
         """
-        Load rankings from file or interactively input them.
+        Load ratings from file or interactively input them.
         
         Args:
-            rankings_file: Path to JSON file with rankings
+            ratings_file: Path to JSON file with ratings
         """
-        if rankings_file:
-            with open(rankings_file, 'r') as f:
-                self.rankings = json.load(f)
+        if ratings_file:
+            with open(ratings_file, 'r') as f:
+                self.ratings = json.load(f)
         else:
-            rankings_path = self.logs_dir / "rankings.json"
-            if rankings_path.exists():
-                with open(rankings_path, 'r') as f:
-                    self.rankings = json.load(f)
-                print(f"Loaded rankings from {rankings_path}")
+            ratings_path = self.logs_dir / "ratings.json"
+            if ratings_path.exists():
+                with open(ratings_path, 'r') as f:
+                    self.ratings = json.load(f)
+                print(f"Loaded ratings from {ratings_path}")
             else:
-                self._interactive_ranking()
+                self._interactive_rating()
     
-    def _interactive_ranking(self):
-        """Interactively input rankings for episodes."""
-        print("\nPlease rank the episodes from 1 (best) to N (worst).")
-        print("After viewing the videos, enter the ranking for each episode.")
+    def _interactive_rating(self):
+        """Interactively input ratings for episodes (1-100)."""
+        print("\nPlease rate each episode from 1 (worst) to 100 (best).")
+        print("After viewing the videos, enter a rating for each episode.")
         
-        self.rankings = {}
+        self.ratings = {}  # Change from rankings to ratings
         for i in range(self.total_episodes):
-            rank = int(input(f"Rank for episode {i+1} (1 is best): "))
-            self.rankings[str(i)] = rank
+            while True:
+                try:
+                    rating = int(input(f"Rating for episode {i} (1-100): "))
+                    if 1 <= rating <= 100:
+                        self.ratings[str(i)] = rating
+                        break
+                    else:
+                        print("Please enter a rating between 1 and 100")
+                except ValueError:
+                    print("Please enter a valid number")
         
-        # Save rankings
-        rankings_path = self.logs_dir / "rankings.json"
-        with open(rankings_path, 'w') as f:
-            json.dump(self.rankings, f)
-        print(f"Saved rankings to {rankings_path}")
+        # Save ratings
+        ratings_path = self.logs_dir / "ratings.json"
+        with open(ratings_path, 'w') as f:
+            json.dump(self.ratings, f)
+        print(f"Saved ratings to {ratings_path}")
     
     def generate_pairwise_preferences(self):
-        """Generate pairwise preferences from rankings."""
-        if not self.rankings:
-            raise ValueError("Rankings must be loaded before generating preferences")
-        
-        # Convert rankings to list of (episode_idx, rank)
-        ranked_episodes = [(int(episode_idx), rank) for episode_idx, rank in self.rankings.items()]
-        
-        # Sort by rank (lower rank is better)
-        ranked_episodes.sort(key=lambda x: x[1])
+        """Generate pairwise preferences from ratings."""
+        if not hasattr(self, 'ratings'):
+            raise ValueError("Ratings must be loaded before generating preferences")
         
         # Generate all pairs of episodes
         self.pairwise_preferences = []
-        for i in range(len(ranked_episodes)):
-            for j in range(i+1, len(ranked_episodes)):
-                better_idx, better_rank = ranked_episodes[i]
-                worse_idx, worse_rank = ranked_episodes[j]
-                
-                # The episode with lower rank is preferred
-                self.pairwise_preferences.append({
-                    "chosen_idx": better_idx,
-                    "rejected_idx": worse_idx,
-                    "chosen_trajectory": self.trajectories[better_idx],
-                    "rejected_trajectory": self.trajectories[worse_idx],
-                })
+        cpl_data = []  # Separate list for CPL formatted data
         
-        # Save preferences
+        for i in range(self.total_episodes):
+            for j in range(i+1, self.total_episodes):
+                rating_i = self.ratings[str(i)]
+                rating_j = self.ratings[str(j)]
+                
+                # Higher rated episode is chosen
+                if rating_i > rating_j:
+                    chosen_idx, rejected_idx = i, j
+                else:
+                    chosen_idx, rejected_idx = j, i
+                
+                chosen_traj = self.trajectories[chosen_idx]
+                rejected_traj = self.trajectories[rejected_idx]
+                
+                # Store full preference data
+                self.pairwise_preferences.append({
+                    "chosen_idx": chosen_idx,
+                    "rejected_idx": rejected_idx,
+                    "chosen_trajectory": chosen_traj,
+                    "rejected_trajectory": rejected_traj,
+                    "chosen_rating": max(rating_i, rating_j),
+                    "rejected_rating": min(rating_i, rating_j),
+                    "rating_difference": abs(rating_i - rating_j)
+                })
+                
+                # Format for CPL training
+                cpl_item = {
+                    "chosen": {
+                        "observations": chosen_traj["observations"],
+                        "actions": chosen_traj["actions"],
+                        "rewards": chosen_traj["rewards"],
+                    },
+                    "rejected": {
+                        "observations": rejected_traj["observations"],
+                        "actions": rejected_traj["actions"],
+                        "rewards": rejected_traj["rewards"],
+                    },
+                    "chosen_return": chosen_traj["return"],
+                    "rejected_return": rejected_traj["return"],
+                    "chosen_idx": chosen_idx,
+                    "rejected_idx": rejected_idx
+                }
+                
+                cpl_data.append(cpl_item)
+        
+        # Save full preferences
         preferences_path = self.logs_dir / "pairwise_preferences.pkl"
         with open(preferences_path, 'wb') as f:
             pickle.dump(self.pairwise_preferences, f)
@@ -415,7 +451,7 @@ class PreferenceDataGenerator:
         # Save CPL dataset in data_dir root
         cpl_path = self.data_dir / "cpl_dataset.pkl"
         with open(cpl_path, 'wb') as f:
-            pickle.dump(self.pairwise_preferences, f)
+            pickle.dump(cpl_data, f)  # Save the CPL formatted data
         
         print(f"Saved CPL dataset to {cpl_path}")
 
@@ -438,10 +474,10 @@ if __name__ == "__main__":
     # Generate episodes
     generator.generate_episodes()
     
-    # If not just generating, also handle rankings and preferences
+    # If not just generating, also handle ratings and preferences
     if not args.generate_only:
-        # Load rankings
-        generator.load_rankings(args.rankings_file)
+        # Load ratings
+        generator.load_ratings(args.rankings_file)
         
         # Generate pairwise preferences
         generator.generate_pairwise_preferences()
