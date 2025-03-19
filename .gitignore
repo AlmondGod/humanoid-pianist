@@ -5,3 +5,4 @@ __pycache__
 RLHF/preference_data/*
 RLHF/finetune_sac_models/*
 RLHF/reward_models/*
+eval/*

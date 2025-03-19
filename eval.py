@@ -29,7 +29,7 @@ from dm_control import composer
 from mujoco_utils import composer_utils
 
 from robopianist import music
-from robopianist.suite.tasks import piano_with_shadow_hands
+from piano_with_shadow_hands_and_g1 import PianoWithShadowHandsAndG1
 
 # RoboPianist-repertoire-150.
 _BASE_REPERTOIRE_NAME = "RoboPianist-repertoire-150-{}-v0"
@@ -93,24 +93,12 @@ def load(
     task_kwargs = task_kwargs or {}
 
     return composer_utils.Environment(
-        #TODO: change pianowithshadowhands to pianowithshadowhandsandeval
-        task=piano_with_shadow_hands.PianoWithShadowHands(midi=midi, **task_kwargs),
+        task=PianoWithShadowHandsAndG1(midi=midi, **task_kwargs),
         random_state=seed,
         strip_singleton_obs_buffer_dim=True,
         recompile_physics=recompile_physics,
         legacy_step=legacy_step,
     )
-
-
-
-class PianoWithShadowHandsAndEval(piano_with_shadow_hands.PianoWithShadowHands):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.task = piano_with_shadow_hands.PianoWithShadowHands(midi=self.midi, **self.task_kwargs)
-
-    def add_g1(self):
-        self.task.arena.attach(G1Entity(self.task.arena.mjcf_model), self.task.arena.mjcf_model.worldbody.add('site', name='g1_attachment', size=[0.01, 0.01, 0.01], pos=[0.0, 0.0, 0.0]))
-
 
 __all__ = [
     "ALL",
@@ -159,11 +147,11 @@ class Args:
     clip: bool = True
     record_every: int = 1
     record_resolution: Tuple[int, int] = (480, 640)
-    camera_id: Optional[str | int] = "piano/back"
+    camera_id: Optional[str | int] = "panning_camera"
     action_reward_observation: bool = True
     agent_config: sac.SACConfig = sac.SACConfig()
     algorithm: Literal["sac"] = "sac"  # Add QTOpt option
-    add_unitree_g1: bool = True
+    add_unitree_g1: bool = False
     unitree_g1_path: Optional[str] = "/Users/almondgod/Repositories/robopianist/robopianist-rl/mujoco_menagerie/unitree_g1/g1_modified.xml"
     unitree_position: Tuple[float, float, float] = (0.0, 0.4, 0.7)
 
@@ -236,9 +224,6 @@ def main(args: Args) -> None:
         run_name = args.name
     else:
         run_name = f"{args.algorithm.upper()}-{args.midi_file}-{args.seed}-{time.strftime('%Y-%m-%d-%H-%M-%S')}"
-
-    print(f"\nStarting training run: {run_name}")
-    print(f"Saving to directory: {args.root_dir}")
 
     # Create experiment directory.
     experiment_dir = Path(args.root_dir) / run_name
