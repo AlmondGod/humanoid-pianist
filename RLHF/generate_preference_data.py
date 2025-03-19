@@ -109,375 +109,210 @@ class Args:
     # Optional settings
     rankings_file: Optional[str] = None
     generate_only: bool = False
+    
+    # Segment settings
+    segment_length: float = 5.0  # Length of each segment in seconds
+    control_timestep: float = 0.05  # Environment timestep
+    steps_per_segment: int = field(init=False)
+    
+    # Add missing environment args
+    n_steps_lookahead: int = 10
+    trim_silence: bool = False
+    gravity_compensation: bool = True
+    reduced_action_space: bool = True
+    wrong_press_termination: bool = False
+    disable_fingering_reward: bool = True
+    disable_forearm_reward: bool = False
+    camera_id: str = "piano/back"
+    action_reward_observation: bool = True
+    
+    def __post_init__(self):
+        self.steps_per_segment = int(self.segment_length / self.control_timestep)
 
-class PreferenceDataGenerator:
-    def __init__(
-        self,
-        checkpoints: List[str],
-        noise_scales: List[float],
-        midi_file: str = None,
-        environment_name: str = None,
-        episodes_per_config: int = 1,
-        seed: int = 42,
-        data_dir: str = "RLHF/preference_data",
-        algorithm: str = "sac"
-    ):
-        """Initialize the preference data generator."""
-        self.checkpoints = checkpoints
-        self.noise_scales = noise_scales
-        self.midi_file = midi_file
-        self.environment_name = environment_name
-        self.episodes_per_config = episodes_per_config
-        self.total_episodes = len(checkpoints) * len(noise_scales) * episodes_per_config
-        self.seed = seed
-        self.algorithm = algorithm
+class SegmentDataGenerator:
+    def __init__(self, args):
+        self.args = args
         
-        # Create timestamped directories
+        # Set random seeds
+        random.seed(args.seed)
+        np.random.seed(args.seed)
+        
+        # Create output directories
         timestamp = time.strftime('%Y-%m-%d-%H-%M-%S')
-        self.base_data_dir = Path(data_dir)
+        self.base_data_dir = Path(args.data_dir)
         self.data_dir = self.base_data_dir / timestamp
-        
-        # Create subdirectories
         self.video_dir = self.data_dir / "videos"
         self.logs_dir = self.data_dir / "logs"
         
         for dir_path in [self.video_dir, self.logs_dir]:
             dir_path.mkdir(parents=True, exist_ok=True)
         
-        # Save configuration
-        config = {
-            "checkpoints": checkpoints,
-            "noise_scales": noise_scales,
-            "midi_file": midi_file,
-            "environment_name": environment_name,
-            "episodes_per_config": episodes_per_config,
-            "seed": seed,
-            "algorithm": algorithm,
-            "timestamp": timestamp
-        }
-        with open(self.logs_dir / "config.json", 'w') as f:
-            json.dump(config, f, indent=2)
-        
-        # Set random seeds
-        random.seed(seed)
-        np.random.seed(seed)
-        
-        # Initialize environment and agent
-        self._setup_env_and_agent()
-        
-        # Initialize data storage
-        self.trajectories = []
-        self.rankings = {}
-        self.pairwise_preferences = []
-    
-    def _setup_env_and_agent(self):
-        """Set up the environment and load the agent."""
-        # Configure environment args
-        from dataclasses import dataclass
-        
-        @dataclass
-        class EnvArgs:
-            midi_file: Optional[Path] = Path(self.midi_file) if self.midi_file else None
-            environment_name: Optional[str] = self.environment_name
-            trim_silence: bool = True
-            gravity_compensation: bool = True
-            reduced_action_space: bool = True
-            control_timestep: float = 0.05
-            n_steps_lookahead: int = 10
-            disable_fingering_reward: bool = True
-            disable_forearm_reward: bool = False
-            wrong_press_termination: bool = False
-            action_reward_observation: bool = True
-            primitive_fingertip_collisions: bool = True
-            record_dir: Optional[Path] = self.video_dir
-            camera_id: str = "piano/back"
-            
-        self.env_args = EnvArgs()
-        
-        # Create environment for evaluation with recording
-        self.env = get_env(self.env_args, record_dir=self.video_dir)
-        
-        # Get environment spec
-        self.spec = EnvironmentSpec.make(self.env)
-        
-        # Don't load agent here anymore since we'll load per checkpoint
-        self.env = get_env(self.env_args, record_dir=self.video_dir)
+        # Initialize environment
+        self.env = get_env(args, record_dir=self.video_dir)
         self.spec = EnvironmentSpec.make(self.env)
     
-    def generate_episodes(self):
-        """Generate episodes from multiple checkpoints with varying noise."""
-        episode_idx = 0
-        self.video_paths = []
-        self.trajectories = []
-        self.config_info = []  # Store which checkpoint and noise level was used
+    def load_agent(self, checkpoint_path):
+        """Load agent from checkpoint."""
+        with open(checkpoint_path, 'rb') as f:
+            checkpoint = pickle.load(f)
+        
+        # Initialize SAC agent
+        sac_config = SACConfig(
+            hidden_dims=(256, 256, 256),
+            critic_dropout_rate=0.01,
+            critic_layer_norm=True,
+        )
+        agent = SAC.initialize(self.spec, sac_config, seed=self.args.seed)
+        
+        # Load parameters
+        agent = agent.replace(
+            actor=agent.actor.replace(params=checkpoint['params']),
+            critic=agent.critic.replace(params=checkpoint['critic_params']),
+            target_critic=agent.target_critic.replace(params=checkpoint['target_critic_params']),
+            temp=agent.temp.replace(params=checkpoint['temp_params'])
+        )
+        return agent
 
-        for checkpoint_path in self.checkpoints:
-            print(f"\nUsing checkpoint: {checkpoint_path}")
+    def generate_segments(self):
+        """Generate segments from multiple checkpoints with noise."""
+        segments = []
+        segment_info = []
+        
+        for checkpoint_path in self.args.checkpoints:
+            agent = self.load_agent(checkpoint_path)
             
-            # Load checkpoint
-            with open(checkpoint_path, 'rb') as f:
-                sac_checkpoint = pickle.load(f)
-            
-            # Initialize SAC agent
-            sac_config = SACConfig(
-                hidden_dims=(256, 256, 256),
-                critic_dropout_rate=0.01,
-                critic_layer_norm=True,
-            )
-            agent = SAC.initialize(self.spec, sac_config, seed=self.seed)
-            
-            # Load parameters
-            agent = agent.replace(
-                actor=agent.actor.replace(params=sac_checkpoint['params']),
-                critic=agent.critic.replace(params=sac_checkpoint['critic_params']),
-                target_critic=agent.target_critic.replace(params=sac_checkpoint['target_critic_params']),
-                temp=agent.temp.replace(params=sac_checkpoint['temp_params'])
-            )
-
-            for noise_scale in self.noise_scales:
-                print(f"\nUsing noise scale: {noise_scale}")
-                
-                for _ in range(self.episodes_per_config):
-                    # Roll out episode with noise
-                    trajectory = {
-                        "observations": [],
-                        "actions": [],
-                        "rewards": [],
-                        "next_observations": [],
-                        "dones": []
-                    }
-                    
+            for noise_scale in self.args.noise_scales:
+                print(f"Generating segments for checkpoint {checkpoint_path} with noise scale {noise_scale}")
+                for _ in range(self.args.episodes_per_config):
                     timestep = self.env.reset()
-                    episode_return = 0
+                    current_segment = []
                     
                     while not timestep.last():
-                        # Get action from policy
                         action = agent.eval_actions(timestep.observation)
-                        
-                        # Add noise to action
                         if noise_scale > 0:
                             noise = np.random.normal(0, noise_scale, size=action.shape)
                             action = np.clip(action + noise, -1, 1)
                         
-                        # Step environment
                         next_timestep = self.env.step(action)
                         
-                        # Store transition
-                        trajectory["observations"].append(timestep.observation)
-                        trajectory["actions"].append(action)
-                        trajectory["rewards"].append(next_timestep.reward)
-                        trajectory["next_observations"].append(next_timestep.observation)
-                        trajectory["dones"].append(next_timestep.last())
+                        current_segment.append({
+                            "state": timestep.observation,
+                            "action": action,
+                            "next_state": next_timestep.observation,
+                        })
                         
-                        episode_return += next_timestep.reward
+                        if len(current_segment) == self.args.steps_per_segment:
+                            segments.append(current_segment)
+                            segment_info.append({
+                                "checkpoint": checkpoint_path,
+                                "noise_scale": noise_scale,
+                                "start_time": len(segments) * self.args.segment_length
+                            })
+                            current_segment = []
+                        
                         timestep = next_timestep
-
-                    # Store episode info
-                    self.config_info.append({
-                        "episode_idx": episode_idx,
-                        "checkpoint": checkpoint_path,
-                        "noise_scale": noise_scale,
-                        "return": episode_return
-                    })
                     
-                    # Get the video file path (most recent file in the directory)
+                    # Handle partial segment at end of episode
+                    if len(current_segment) > 0:
+                        segments.append(current_segment)
+                        segment_info.append({
+                            "checkpoint": checkpoint_path,
+                            "noise_scale": noise_scale,
+                            "start_time": len(segments) * self.args.segment_length
+                        })
+                    
+                    # Save video
                     video_files = sorted(self.video_dir.glob("*.mp4"), key=os.path.getctime)
                     if video_files:
                         latest_video = video_files[-1]
-                        # Rename to include episode number
-                        new_name = self.video_dir / f"episode_{episode_idx:03d}.mp4"
+                        new_name = self.video_dir / f"episode_{len(segments):03d}_noise_{noise_scale:.2f}.mp4"
                         shutil.move(latest_video, new_name)
-                        self.video_paths.append(str(new_name))
-                    else:
-                        print(f"Warning: No video found for episode {episode_idx}")
-                        self.video_paths.append(None)
-                    
-                    # Convert trajectory lists to numpy arrays
-                    for key in trajectory:
-                        trajectory[key] = np.array(trajectory[key])
-                    
-                    # Add episode stats
-                    trajectory["return"] = episode_return
-                    trajectory["info"] = self.env.get_statistics()
-                    trajectory["musical_metrics"] = self.env.get_musical_metrics()
-                    trajectory["video_path"] = self.video_paths[-1]
-                    
-                    # Store trajectory
-                    self.trajectories.append(trajectory)
-                    
-                    # Print episode stats
-                    print(f"Episode {episode_idx+1} return: {episode_return:.2f}")
-                    print(f"Episode stats: {trajectory['info']}")
-                    print(f"Musical metrics: {trajectory['musical_metrics']}")
-                    print(f"Video saved to: {self.video_paths[-1]}")
-                    print("-" * 50)
-                    
-                    episode_idx += 1
-
-        # Save config info
-        with open(self.logs_dir / "episode_configs.json", 'w') as f:
-            json.dump(self.config_info, f, indent=2)
+                        
+                        for info in segment_info[-len(segments):]:
+                            info["video_path"] = str(new_name)
         
-        # Generate command to view videos
-        print("\nTo view all videos for ranking, run:")
-        if os.name == 'nt':  # Windows
-            print(f"start {self.video_dir}")
-        else:  # macOS or Linux
-            print(f"open {self.video_dir}")
+        # Save all data
+        data = {
+            "segments": segments,
+            "segment_info": segment_info,
+            "args": self.args
+        }
+        with open(self.data_dir / "segments.pkl", "wb") as f:
+            pickle.dump(data, f)
         
-        print("\nAfter viewing, rank the episodes from 1 (best) to N (worst).")
-        print("You can use the interactive ranking interface by running:")
-        print(f"python RLHF/rank_episodes.py --data_dir {self.data_dir}")
+        return segments, segment_info
     
-    def _save_trajectories(self):
-        """Save trajectories to disk."""
-        trajectory_path = self.logs_dir / "trajectories.pkl"
-        with open(trajectory_path, 'wb') as f:
-            pickle.dump({
-                "trajectories": self.trajectories,
-                "video_paths": self.video_paths,
-                "env_info": {
-                    "midi_file": self.midi_file,
-                    "environment_name": self.environment_name
-                }
-            }, f)
-        print(f"Saved trajectories to {trajectory_path}")
-    
-    def load_ratings(self, ratings_file: str = None):
-        """
-        Load ratings from file or interactively input them.
+    def collect_ratings(self, segments, segment_info):
+        """Collect ratings for each segment."""
+        print("\nPlease rate each segment from 1 (worst) to 100 (best)")
         
-        Args:
-            ratings_file: Path to JSON file with ratings
-        """
-        if ratings_file:
-            with open(ratings_file, 'r') as f:
-                self.ratings = json.load(f)
-        else:
-            ratings_path = self.logs_dir / "ratings.json"
-            if ratings_path.exists():
-                with open(ratings_path, 'r') as f:
-                    self.ratings = json.load(f)
-                print(f"Loaded ratings from {ratings_path}")
-            else:
-                self._interactive_rating()
-    
-    def _interactive_rating(self):
-        """Interactively input ratings for episodes (1-100)."""
-        print("\nPlease rate each episode from 1 (worst) to 100 (best).")
-        print("After viewing the videos, enter a rating for each episode.")
-        
-        self.ratings = {}  # Change from rankings to ratings
-        for i in range(self.total_episodes):
+        ratings = {}
+        for i, (segment, info) in enumerate(zip(segments, segment_info)):
+            print(f"\nSegment {i}:")
+            print(f"From checkpoint: {info['checkpoint']}")
+            print(f"Start time: {info['start_time']}s")
+            print(f"Video: {info['video_path']}")
+            
             while True:
                 try:
-                    rating = int(input(f"Rating for episode {i} (1-100): "))
+                    rating = int(input(f"Rating (1-100): "))
                     if 1 <= rating <= 100:
-                        self.ratings[str(i)] = rating
+                        ratings[i] = rating
                         break
-                    else:
-                        print("Please enter a rating between 1 and 100")
                 except ValueError:
                     print("Please enter a valid number")
         
-        # Save ratings
-        ratings_path = self.logs_dir / "ratings.json"
-        with open(ratings_path, 'w') as f:
-            json.dump(self.ratings, f)
-        print(f"Saved ratings to {ratings_path}")
+        return ratings
     
-    def generate_pairwise_preferences(self):
-        """Generate pairwise preferences from ratings."""
-        if not hasattr(self, 'ratings'):
-            raise ValueError("Ratings must be loaded before generating preferences")
+    def generate_pairwise_data(self, segments, segment_info, ratings):
+        """Generate pairwise preference data from segment ratings."""
+        pairwise_data = []
         
-        # Generate all pairs of episodes
-        self.pairwise_preferences = []
-        cpl_data = []  # Separate list for CPL formatted data
+        # Only compare segments from the same checkpoint
+        for checkpoint in set(info["checkpoint"] for info in segment_info):
+            # Get indices of segments from this checkpoint
+            checkpoint_indices = [
+                i for i, info in enumerate(segment_info) 
+                if info["checkpoint"] == checkpoint
+            ]
+            
+            # Generate all pairs from these segments
+            for i in checkpoint_indices:
+                for j in checkpoint_indices:
+                    if i < j:  # Avoid duplicates
+                        if ratings[i] != ratings[j]:  # Only include if there's a clear preference
+                            # Higher rated segment is preferred
+                            if ratings[i] > ratings[j]:
+                                preferred = segments[i]
+                                non_preferred = segments[j]
+                            else:
+                                preferred = segments[j]
+                                non_preferred = segments[i]
+                            
+                            pairwise_data.append({
+                                "preferred": preferred,
+                                "non_preferred": non_preferred,
+                                "rating_diff": abs(ratings[i] - ratings[j])
+                            })
         
-        for i in range(self.total_episodes):
-            for j in range(i+1, self.total_episodes):
-                rating_i = self.ratings[str(i)]
-                rating_j = self.ratings[str(j)]
-                
-                # Higher rated episode is chosen
-                if rating_i > rating_j:
-                    chosen_idx, rejected_idx = i, j
-                else:
-                    chosen_idx, rejected_idx = j, i
-                
-                chosen_traj = self.trajectories[chosen_idx]
-                rejected_traj = self.trajectories[rejected_idx]
-                
-                # Store full preference data
-                self.pairwise_preferences.append({
-                    "chosen_idx": chosen_idx,
-                    "rejected_idx": rejected_idx,
-                    "chosen_trajectory": chosen_traj,
-                    "rejected_trajectory": rejected_traj,
-                    "chosen_rating": max(rating_i, rating_j),
-                    "rejected_rating": min(rating_i, rating_j),
-                    "rating_difference": abs(rating_i - rating_j)
-                })
-                
-                # Format for CPL training
-                cpl_item = {
-                    "chosen": {
-                        "observations": chosen_traj["observations"],
-                        "actions": chosen_traj["actions"],
-                        "rewards": chosen_traj["rewards"],
-                    },
-                    "rejected": {
-                        "observations": rejected_traj["observations"],
-                        "actions": rejected_traj["actions"],
-                        "rewards": rejected_traj["rewards"],
-                    },
-                    "chosen_return": chosen_traj["return"],
-                    "rejected_return": rejected_traj["return"],
-                    "chosen_idx": chosen_idx,
-                    "rejected_idx": rejected_idx
-                }
-                
-                cpl_data.append(cpl_item)
-        
-        # Save full preferences
-        preferences_path = self.logs_dir / "pairwise_preferences.pkl"
-        with open(preferences_path, 'wb') as f:
-            pickle.dump(self.pairwise_preferences, f)
-        
-        print(f"Generated {len(self.pairwise_preferences)} pairwise preferences")
-        print(f"Saved preferences to {preferences_path}")
-        
-        # Save CPL dataset in data_dir root
-        cpl_path = self.data_dir / "cpl_dataset.pkl"
-        with open(cpl_path, 'wb') as f:
-            pickle.dump(cpl_data, f)  # Save the CPL formatted data
-        
-        print(f"Saved CPL dataset to {cpl_path}")
+        return pairwise_data
 
 if __name__ == "__main__":
     import tyro
     args = tyro.cli(Args)
     
+    print(f"Generating preference data for {args.midi_file}")
     # Create generator
-    generator = PreferenceDataGenerator(
-        checkpoints=args.checkpoints,
-        noise_scales=args.noise_scales,
-        midi_file=args.midi_file,
-        environment_name=args.environment_name,
-        episodes_per_config=args.episodes_per_config,
-        seed=args.seed,
-        data_dir=args.data_dir,
-        algorithm=args.algorithm
-    )
+    generator = SegmentDataGenerator(args)
     
-    # Generate episodes
-    generator.generate_episodes()
-    
-    # If not just generating, also handle ratings and preferences
-    if not args.generate_only:
-        # Load ratings
-        generator.load_ratings(args.rankings_file)
-        
-        # Generate pairwise preferences
-        generator.generate_pairwise_preferences()
+    print("Generating segments")
+    # Generate segments
+    segments, segment_info = generator.generate_segments()
+
+    print("Collecting ratings")
+    # Collect ratings
+    ratings = generator.collect_ratings(segments, segment_info)
+
+    print("Generating pairwise data")
+    # Generate pairwise data
+    pairwise_data = generator.generate_pairwise_data(segments, segment_info, ratings)
