@@ -224,7 +224,7 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
         # First call parent's after_step
         super().after_step(physics, random_state)
 
-        # Update camera position
+        # Update camera position - only rotate in the horizontal plane
         self._camera_angle += self._camera_angular_velocity
         new_x = self._camera_radius * np.cos(self._camera_angle)
         new_y = self._camera_radius * np.sin(self._camera_angle)
@@ -234,22 +234,23 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
         camera.pos = [new_x, new_y, self._camera_height]
         
         # Calculate the direction vector from camera to center point (0,0,0)
-        camera_pos = np.array([new_x, new_y, self._camera_height])
-        look_dir = -camera_pos  # Vector pointing from camera to origin
-        look_dir = look_dir / np.linalg.norm(look_dir)  # Normalize
+        look_dir = np.array([0 - new_x, 0 - new_y, 0 - self._camera_height])
+        look_dir = look_dir / np.linalg.norm(look_dir)
         
-        # Calculate up vector (always pointing up in world space)
+        # Fixed up vector (world up)
         up = np.array([0, 0, 1])
         
-        # Calculate right vector using cross product
+        # Calculate right vector
         right = np.cross(look_dir, up)
         right = right / np.linalg.norm(right)
         
-        # Recalculate up vector to ensure orthogonality
+        # Recalculate up to ensure orthogonality
         up = np.cross(right, look_dir)
+        up = up / np.linalg.norm(up)
         
-        # Create rotation matrix
-        rot_matrix = np.array([right, -look_dir, up])
+        # Create rotation matrix [right, up, -look_dir]
+        # This ensures the camera maintains its orientation while looking at the center
+        rot_matrix = np.array([right, up, -look_dir]).T
         
         # Convert rotation matrix to quaternion
         trace = np.trace(rot_matrix)
