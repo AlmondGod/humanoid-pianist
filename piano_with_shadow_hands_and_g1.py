@@ -102,14 +102,18 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
             # Default position behind the piano
             position = [0.5, 0.0, 0.0]  # x, y, z coordinates
             
-            # Create attachment site with unique name
+            print("\n=== Adding G1 Debug ===")
+            
+            # Create attachment site with unique name and rotated orientation
             site_name = f'g1_attachment_{id(self)}'  # Use unique identifier
             attachment_site = self._arena.mjcf_model.worldbody.add(
                 'site',
                 name=site_name,
                 size=[0.01, 0.01, 0.01],
-                pos=position
+                pos=position,
+                euler=[0, 0, 3.14159]  # Rotate 180 degrees around Z axis (in radians)
             )
+            print(f"Created attachment site with rotation")
 
             # Find the G1 model path
             model_path = self._find_g1_model()
@@ -124,6 +128,7 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
             self._g1 = g1_entity
             
             print("Successfully added G1 to environment")
+            print("=== End Adding G1 Debug ===\n")
             
         except Exception as e:
             print(f"Error adding G1 to environment: {e}")
@@ -134,6 +139,10 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
     def initialize_episode(self, physics, random_state):
         """Initialize episode, including camera position."""
         super().initialize_episode(physics, random_state)
+        
+        print("\n=== G1 Debug Start ===")
+        print(f"Has G1 attribute: {hasattr(self, '_g1')}")
+        print(f"G1 is not None: {self._g1 is not None if hasattr(self, '_g1') else False}")
         
         # Reset camera angle
         self._camera_angle = 0.0
@@ -146,28 +155,55 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
         # Initialize G1 if it exists
         if hasattr(self, '_g1') and self._g1 is not None:
             try:
-                # Find the G1's pelvis body with correct prefix
-                body_name = "g1_29dof_rev_1_0/pelvis"  # Updated with correct prefix
-                pelvis_id = physics.model.name2id(body_name, "body")
+                print("\nAvailable bodies in physics:")
+                for i in range(physics.model.nbody):
+                    print(f"Body {i}: {physics.model.id2name(i, 'body')}")
                 
-                if pelvis_id >= 0:
-                    # Set initial position
-                    physics.data.xpos[pelvis_id] = [0.0, 0.4, 0.7]
+                # Find the G1's root body
+                root_name = "g1_29dof_rev_1_0/"  # The root body
+                root_id = physics.model.name2id(root_name, "body")
+                print(f"\nLooking for root body: {root_name}")
+                print(f"Found root_id: {root_id}")
+                
+                if root_id >= 0:
+                    print("\n=== G1 Orientation Debug ===")
                     
-                    # Set orientation - 180 degree rotation around Z axis
-                    # [w, x, y, z] quaternion for 180° around Z: [0, 0, 0, 1] -> [0, 0, 1, 0]
-                    physics.data.quat[pelvis_id] = [0, 0, 1, 0]
+                    # Get initial state
+                    init_pos = physics.data.xpos[root_id].copy()
+                    init_xquat = physics.data.xquat[root_id].copy()
+                    print(f"Initial position: {init_pos}")
+                    print(f"Initial xquat: {init_xquat}")
                     
-                    # Apply changes
+                    # Set position and orientation for root body
+                    physics.data.xpos[root_id] = [0.0, 0.4, 0.7]
+                    physics.data.xquat[root_id] = [0, 0, 1, 0]  # 180° around Y axis
+                    
+                    # Apply changes and verify
                     physics.forward()
-                    print(f"Successfully initialized G1 position and orientation (facing opposite direction)")
+                    
+                    print("\nFinal state:")
+                    print(f"Position: {physics.data.xpos[root_id]}")
+                    print(f"Quaternion: {physics.data.xquat[root_id]}")
+                    print(f"Rotation matrix:\n{physics.data.xmat[root_id].reshape(3,3)}")
+                    
+                    # Also verify pelvis state
+                    pelvis_name = "g1_29dof_rev_1_0/pelvis"
+                    pelvis_id = physics.model.name2id(pelvis_name, "body")
+                    if pelvis_id >= 0:
+                        print("\nPelvis final state:")
+                        print(f"Position: {physics.data.xpos[pelvis_id]}")
+                        print(f"Quaternion: {physics.data.xquat[pelvis_id]}")
+                    
+                    print("=== End G1 Orientation Debug ===\n")
                 else:
-                    print(f"Warning: Could not find G1 pelvis body with name {body_name}")
+                    print(f"Warning: Could not find G1 root body with name {root_name}")
                     
             except Exception as e:
                 print(f"Warning: Could not initialize G1 pose: {e}")
                 import traceback
                 traceback.print_exc()
+        
+        print("=== G1 Debug End ===\n")
 
     # TODO: the below functions are from piano with shadow hands. 
     def _set_rewards(self) -> None:
@@ -273,9 +309,6 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
     def _update_g1_arms(self, physics: mjcf.Physics, hand_positions: dict) -> None:
         """Update G1 arm positions based on shadow hand positions."""
         try:
-            print("\n=== G1 Arm Update Debug ===")
-            print(f"Shadow hand positions: Left={hand_positions['left']}, Right={hand_positions['right']}")
-            
             # Get joint IDs and ranges
             left_joint_ids = []
             right_joint_ids = []
@@ -285,12 +318,6 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
             # Track which joints were found
             found_joints = []
             
-            # Print all available joints in the model for debugging
-            print("\nAll joints in model:")
-            for i in range(physics.model.njnt):
-                print(f"Joint {i}: {physics.model.id2name(i, 'joint')}")
-            
-            print("\nLooking for left arm joints:")
             for joint_name in self._left_arm_joints:
                 joint_id = physics.model.name2id(joint_name, "joint")
                 if joint_id >= 0:
@@ -298,11 +325,9 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
                     joint_range = physics.model.jnt_range[joint_id]
                     left_joint_ranges.append(joint_range)
                     found_joints.append(joint_name)
-                    print(f"Found {joint_name}: ID={joint_id}, Range={joint_range}")
                 else:
                     print(f"Warning: Could not find joint {joint_name}")
             
-            print("\nLooking for right arm joints:")
             for joint_name in self._right_arm_joints:
                 joint_id = physics.model.name2id(joint_name, "joint")
                 if joint_id >= 0:
@@ -310,11 +335,8 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
                     joint_range = physics.model.jnt_range[joint_id]
                     right_joint_ranges.append(joint_range)
                     found_joints.append(joint_name)
-                    print(f"Found {joint_name}: ID={joint_id}, Range={joint_range}")
                 else:
                     print(f"Warning: Could not find joint {joint_name}")
-
-            print(f"\nFound {len(found_joints)} joints out of {len(self._left_arm_joints) + len(self._right_arm_joints)} expected")
 
             # Get current wrist positions using prefixed names
             prefix = "g1_29dof_rev_1_0/"
@@ -325,25 +347,13 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
                 left_wrist_pos = physics.data.xpos[left_wrist_body]
                 right_wrist_pos = physics.data.xpos[right_wrist_body]
                 
-                print(f"\nCurrent wrist positions:")
-                print(f"Left wrist: {left_wrist_pos}")
-                print(f"Right wrist: {right_wrist_pos}")
-                
                 # Calculate position error
                 left_error = hand_positions['left'] - left_wrist_pos
                 right_error = hand_positions['right'] - right_wrist_pos
                 
-                print(f"\nPosition errors:")
-                print(f"Left error: {left_error}, magnitude: {np.linalg.norm(left_error)}")
-                print(f"Right error: {right_error}, magnitude: {np.linalg.norm(right_error)}")
-                
                 # Increase gain for more visible movement
                 gain = 1.0  # Increased from 0.1
-                print(f"\nUsing gain: {gain}")
                 
-                print("\nJoint Updates:")
-                # Update left arm joints
-                print("\nLeft arm joint updates:")
                 for i, joint_id in enumerate(left_joint_ids):
                     current_pos = physics.data.qpos[physics.model.jnt_qposadr[joint_id]]
                     error_component = left_error[i % 3]
@@ -353,15 +363,9 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
                     target_pos = np.clip(target_pos, left_joint_ranges[i][0], left_joint_ranges[i][1])
                     old_pos = physics.data.qpos[physics.model.jnt_qposadr[joint_id]]
                     physics.data.qpos[physics.model.jnt_qposadr[joint_id]] = target_pos
-                    print(f"Joint {physics.model.id2name(joint_id, 'joint')}:")
-                    print(f"  Current: {old_pos:.4f}")
-                    print(f"  Error component: {error_component:.4f}")
-                    print(f"  Delta: {delta:.4f}")
-                    print(f"  Target: {target_pos:.4f}")
-                    print(f"  Range: {left_joint_ranges[i]}")
                 
                 # Update right arm joints
-                print("\nRight arm joint updates:")
+                # print("\nRight arm joint updates:")
                 for i, joint_id in enumerate(right_joint_ids):
                     current_pos = physics.data.qpos[physics.model.jnt_qposadr[joint_id]]
                     error_component = right_error[i % 3]
@@ -371,25 +375,12 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
                     target_pos = np.clip(target_pos, right_joint_ranges[i][0], right_joint_ranges[i][1])
                     old_pos = physics.data.qpos[physics.model.jnt_qposadr[joint_id]]
                     physics.data.qpos[physics.model.jnt_qposadr[joint_id]] = target_pos
-                    print(f"Joint {physics.model.id2name(joint_id, 'joint')}:")
-                    print(f"  Current: {old_pos:.4f}")
-                    print(f"  Error component: {error_component:.4f}")
-                    print(f"  Delta: {delta:.4f}")
-                    print(f"  Target: {target_pos:.4f}")
-                    print(f"  Range: {right_joint_ranges[i]}")
-                
+
                 # Forward kinematics to update positions
                 physics.forward()
                 
-                # Print final wrist positions after update
-                print(f"\nFinal wrist positions:")
-                print(f"Left wrist: {physics.data.xpos[left_wrist_body]}")
-                print(f"Right wrist: {physics.data.xpos[right_wrist_body]}")
-                
             else:
                 print(f"Warning: Could not find wrist bodies (left: {left_wrist_body}, right: {right_wrist_body})")
-            
-            print("=== End G1 Arm Update ===\n")
             
         except Exception as e:
             print(f"Error in _update_g1_arms: {e}")
@@ -404,14 +395,12 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
     ) -> None:
         """Updates the environment using the control signal."""
         super().before_step(physics, action, random_state)
-
-        print("=== Before Step Debug ===")
         
         # Get shadow hand positions and update G1 arms
         hand_positions = self._get_shadow_hand_positions(physics)
         self._update_g1_arms(physics, hand_positions)
 
-        print("=== End Before Step Debug ===")
+        # print("=== End Before Step Debug ===")
 
     def after_step(
         self,
