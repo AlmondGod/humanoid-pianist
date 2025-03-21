@@ -34,18 +34,36 @@ _FINGERTIP_ALPHA = 1.0
 # Bounds for the uniform distribution from which initial hand offset is sampled.
 _POSITION_OFFSET = 0.05
 
+# Height offset for all components
+_HEIGHT_OFFSET = 0.8
+
+# Modified hand positions - raised higher
+_LEFT_HAND_POSITION = (0.4, -0.15, 0.13 + _HEIGHT_OFFSET)  # Original z=0.13
+_RIGHT_HAND_POSITION = (0.4, 0.15, 0.13 + _HEIGHT_OFFSET)  # Original z=0.13
+
 import os
 
 class PianoWithShadowHandsAndG1(PianoWithShadowHands):
     def __init__(self, *args, **kwargs):
+        # Store height offset before calling super().__init__
+        self._height_offset = _HEIGHT_OFFSET
+        
+        # Override the hand positions in the parent class
+        # from robopianist.suite.tasks.base import _LEFT_HAND_POSITION, _RIGHT_HAND_POSITION
+        import sys
+        # Override the constants in the parent module
+        sys.modules['robopianist.suite.tasks.base']._LEFT_HAND_POSITION = _LEFT_HAND_POSITION
+        sys.modules['robopianist.suite.tasks.base']._RIGHT_HAND_POSITION = _RIGHT_HAND_POSITION
+        
         super().__init__(*args, **kwargs)
-        self._camera_angle = 0.0  # Initialize camera angle
-        self._camera_radius = 2.0  # Distance from center
-        self._camera_height = 1.0  # Height of camera
-        self._camera_angular_velocity = 0.01  # Radians per step
-        self._setup_g1_arm_joints()  # Set up G1 arm joint names
+        self._camera_angle = -0.3
+        self._camera_radius = 1.5
+        self._camera_height = 1.8
+        self._camera_angular_velocity = 0.01
+        self._setup_g1_arm_joints()
         self.add_g1()
         self._setup_camera()
+        self._raise_piano()
 
     def _euler_to_quat(self, roll, pitch, yaw):
         """Convert euler angles to quaternion."""
@@ -100,7 +118,7 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
         """Add Unitree G1 robot to the environment."""
         try:
             # Default position behind the piano
-            position = [0.5, 0.0, 0.0]  # x, y, z coordinates
+            position = [0.6, 0.0, 0.0]  # x, y, z coordinates
             
             print("\n=== Adding G1 Debug ===")
             
@@ -136,9 +154,23 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
             traceback.print_exc()
             self._g1 = None
 
-    def initialize_episode(self, physics, random_state):
-        """Initialize episode, including camera position."""
+    def initialize_episode(self, physics: mjcf.Physics, random_state: np.random.RandomState) -> None:
+        """Initialize episode and raise components."""
+        # First call parent's initialize_episode
         super().initialize_episode(physics, random_state)
+        
+        print("\n=== Raising Hands Debug ===")
+        # Raise the hands using physics
+        for hand_name, hand in [("right", self.right_hand), ("left", self.left_hand)]:
+            hand_body = physics.bind(hand.root_body)
+            current_pos = hand_body.xpos.copy()
+            new_pos = [current_pos[0], current_pos[1], current_pos[2] + self._height_offset]
+            hand_body.xpos = new_pos
+            print(f"{hand_name.capitalize()} hand position: {current_pos} -> {new_pos}")
+        
+        # Apply changes
+        physics.forward()
+        print("=== End Raising Hands Debug ===\n")
         
         print("\n=== G1 Debug Start ===")
         print(f"Has G1 attribute: {hasattr(self, '_g1')}")
@@ -765,3 +797,29 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
         offset = random_state.uniform(low=-_POSITION_OFFSET, high=_POSITION_OFFSET)
         for hand in [self.right_hand, self.left_hand]:
             hand.shift_pose(physics, (0, offset, 0))
+
+    def _raise_piano(self):
+        """Raise the piano position."""
+        # Access the piano's root body and raise its position
+        print("=== Raising piano Debug ===")
+        
+        # Raise the piano base
+        piano_base = self.piano.mjcf_model.find('body', 'base')
+        if piano_base is not None:
+            print("Piano base body found")
+            current_pos = piano_base.pos
+            if current_pos is not None:
+                print(f"Current piano position: {current_pos}")
+                piano_base.pos = (current_pos[0], current_pos[1], current_pos[2] + self._height_offset)
+                print(f"New piano position: {piano_base.pos}")
+        
+        # Raise all piano keys
+        for i in range(88):  # Piano has 88 keys
+            for key_type in ['white_key_', 'black_key_']:
+                key = self.piano.mjcf_model.find('body', f'{key_type}{i}')
+                if key is not None:
+                    current_pos = key.pos
+                    if current_pos is not None:
+                        key.pos = (current_pos[0], current_pos[1], current_pos[2] + self._height_offset)
+        
+        print("=== End Raising piano Debug ===")
