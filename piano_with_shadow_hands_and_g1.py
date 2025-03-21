@@ -49,19 +49,18 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
         self._height_offset = _HEIGHT_OFFSET
         
         # Override the hand positions in the parent class
-        # from robopianist.suite.tasks.base import _LEFT_HAND_POSITION, _RIGHT_HAND_POSITION
         import sys
-        # Override the constants in the parent module
         sys.modules['robopianist.suite.tasks.base']._LEFT_HAND_POSITION = _LEFT_HAND_POSITION
         sys.modules['robopianist.suite.tasks.base']._RIGHT_HAND_POSITION = _RIGHT_HAND_POSITION
         
         super().__init__(*args, **kwargs)
-        self._camera_angle = -0.3
-        self._camera_radius = 1.5
-        self._camera_height = 1.8
-        self._camera_angular_velocity = 0.01
+        self._camera_angle = 0.0
+        self._camera_radius = 1.0
+        self._camera_height = 2.0
+        self._camera_angular_velocity = 0.0
         self._setup_g1_arm_joints()
         self.add_g1()
+        self._disable_collisions_between_hands_and_g1()
         self._setup_camera()
         self._raise_piano()
 
@@ -87,7 +86,7 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
             'camera',
             name='panning_camera',
             pos=[self._camera_radius, 0, self._camera_height],
-            quat=self._euler_to_quat(-0.3, 0, 0),  # Point camera towards center
+            quat=self._euler_to_quat(0, 0, 0),  # Point camera towards center
             mode='fixed'  # Use fixed mode to allow manual control
         )
 
@@ -154,6 +153,45 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
             traceback.print_exc()
             self._g1 = None
 
+    def _initialize_g1_position(self, physics: mjcf.Physics) -> None:
+        """Initialize the G1's position relative to the shadow hands."""
+        if not hasattr(self, '_g1') or self._g1 is None:
+            return
+
+        try:
+            print("\n=== Initializing G1 Position ===")
+            
+            # Find the G1's root body
+            root_name = "g1_29dof_rev_1_0/"
+            root_id = physics.model.name2id(root_name, "body")
+            
+            if root_id >= 0:
+                # Position G1 behind and slightly above the piano
+                # Account for the height offset
+                base_pos = [0.0, 0.3, 0.7 + self._height_offset]
+                physics.data.xpos[root_id] = base_pos
+                
+                # Orient G1 to face the piano
+                physics.data.xquat[root_id] = [0, 0, 1, 0]  # 180° around Y axis
+                
+                # Get hand positions for initial arm positioning
+                hand_positions = self._get_shadow_hand_positions(physics)
+                
+                # Update arm positions to match hands
+                self._update_g1_arms(physics, hand_positions)
+                
+                print(f"G1 base position set to: {base_pos}")
+                print(f"Initial hand positions: {hand_positions}")
+            else:
+                print(f"Warning: Could not find G1 root body with name {root_name}")
+                
+            print("=== End Initializing G1 Position ===\n")
+            
+        except Exception as e:
+            print(f"Error initializing G1 position: {e}")
+            import traceback
+            traceback.print_exc()
+
     def initialize_episode(self, physics: mjcf.Physics, random_state: np.random.RandomState) -> None:
         """Initialize episode and raise components."""
         # First call parent's initialize_episode
@@ -172,70 +210,14 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
         physics.forward()
         print("=== End Raising Hands Debug ===\n")
         
-        print("\n=== G1 Debug Start ===")
-        print(f"Has G1 attribute: {hasattr(self, '_g1')}")
-        print(f"G1 is not None: {self._g1 is not None if hasattr(self, '_g1') else False}")
+        # Initialize G1 position after hands are positioned
+        self._initialize_g1_position(physics)
         
-        # Reset camera angle
+        # Reset and update camera
         self._camera_angle = 0.0
-        
-        # Set initial camera position
         camera = physics.bind(self._camera)
         camera.pos = [self._camera_radius, 0, self._camera_height]
-        camera.quat = self._euler_to_quat(0, -0.3, 0)
-        
-        # Initialize G1 if it exists
-        if hasattr(self, '_g1') and self._g1 is not None:
-            try:
-                print("\nAvailable bodies in physics:")
-                for i in range(physics.model.nbody):
-                    print(f"Body {i}: {physics.model.id2name(i, 'body')}")
-                
-                # Find the G1's root body
-                root_name = "g1_29dof_rev_1_0/"  # The root body
-                root_id = physics.model.name2id(root_name, "body")
-                print(f"\nLooking for root body: {root_name}")
-                print(f"Found root_id: {root_id}")
-                
-                if root_id >= 0:
-                    print("\n=== G1 Orientation Debug ===")
-                    
-                    # Get initial state
-                    init_pos = physics.data.xpos[root_id].copy()
-                    init_xquat = physics.data.xquat[root_id].copy()
-                    print(f"Initial position: {init_pos}")
-                    print(f"Initial xquat: {init_xquat}")
-                    
-                    # Set position and orientation for root body
-                    physics.data.xpos[root_id] = [0.0, 0.4, 0.7]
-                    physics.data.xquat[root_id] = [0, 0, 1, 0]  # 180° around Y axis
-                    
-                    # Apply changes and verify
-                    physics.forward()
-                    
-                    print("\nFinal state:")
-                    print(f"Position: {physics.data.xpos[root_id]}")
-                    print(f"Quaternion: {physics.data.xquat[root_id]}")
-                    print(f"Rotation matrix:\n{physics.data.xmat[root_id].reshape(3,3)}")
-                    
-                    # Also verify pelvis state
-                    pelvis_name = "g1_29dof_rev_1_0/pelvis"
-                    pelvis_id = physics.model.name2id(pelvis_name, "body")
-                    if pelvis_id >= 0:
-                        print("\nPelvis final state:")
-                        print(f"Position: {physics.data.xpos[pelvis_id]}")
-                        print(f"Quaternion: {physics.data.xquat[pelvis_id]}")
-                    
-                    print("=== End G1 Orientation Debug ===\n")
-                else:
-                    print(f"Warning: Could not find G1 root body with name {root_name}")
-                    
-            except Exception as e:
-                print(f"Warning: Could not initialize G1 pose: {e}")
-                import traceback
-                traceback.print_exc()
-        
-        print("=== G1 Debug End ===\n")
+        camera.quat = self._euler_to_quat(0, 1.0, 0)
 
     # TODO: the below functions are from piano with shadow hands. 
     def _set_rewards(self) -> None:
@@ -341,22 +323,23 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
     def _update_g1_arms(self, physics: mjcf.Physics, hand_positions: dict) -> None:
         """Update G1 arm positions based on shadow hand positions."""
         try:
+            # Debug print statements for hand positions
+            print("\n=== G1 Arm Update Debug ===")
+            print(f"Target hand positions: Left={hand_positions['left']}, Right={hand_positions['right']}")
+            
             # Get joint IDs and ranges
             left_joint_ids = []
             right_joint_ids = []
             left_joint_ranges = []
             right_joint_ranges = []
             
-            # Track which joints were found
-            found_joints = []
-            
+            # Get all joints
             for joint_name in self._left_arm_joints:
                 joint_id = physics.model.name2id(joint_name, "joint")
                 if joint_id >= 0:
                     left_joint_ids.append(joint_id)
                     joint_range = physics.model.jnt_range[joint_id]
                     left_joint_ranges.append(joint_range)
-                    found_joints.append(joint_name)
                 else:
                     print(f"Warning: Could not find joint {joint_name}")
             
@@ -366,53 +349,72 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
                     right_joint_ids.append(joint_id)
                     joint_range = physics.model.jnt_range[joint_id]
                     right_joint_ranges.append(joint_range)
-                    found_joints.append(joint_name)
                 else:
                     print(f"Warning: Could not find joint {joint_name}")
 
-            # Get current wrist positions using prefixed names
+            # Get wrist end effector positions
             prefix = "g1_29dof_rev_1_0/"
             left_wrist_body = physics.model.name2id(f"{prefix}left_wrist_yaw_link", "body")
             right_wrist_body = physics.model.name2id(f"{prefix}right_wrist_yaw_link", "body")
             
             if left_wrist_body >= 0 and right_wrist_body >= 0:
-                left_wrist_pos = physics.data.xpos[left_wrist_body]
-                right_wrist_pos = physics.data.xpos[right_wrist_body]
+                # Get current wrist positions
+                left_wrist_pos = physics.data.xpos[left_wrist_body].copy()
+                right_wrist_pos = physics.data.xpos[right_wrist_body].copy()
                 
-                # Calculate position error
+                print(f"Current wrist positions: Left={left_wrist_pos}, Right={right_wrist_pos}")
+                
+                # Calculate position errors (difference between target and current positions)
                 left_error = hand_positions['left'] - left_wrist_pos
                 right_error = hand_positions['right'] - right_wrist_pos
                 
-                # Increase gain for more visible movement
-                gain = 1.0  # Increased from 0.1
+                print(f"Position errors: Left={left_error}, Right={right_error}")
                 
+                # Increase gain for more responsive movement
+                gain = 2.0  # Increased for more responsive movement
+                
+                # Update left arm joints using Jacobian-based IK
                 for i, joint_id in enumerate(left_joint_ids):
-                    current_pos = physics.data.qpos[physics.model.jnt_qposadr[joint_id]]
-                    error_component = left_error[i % 3]
-                    delta = gain * error_component
-                    target_pos = current_pos + delta
+                    # Calculate joint contribution to end effector position
+                    joint_axis = physics.model.jnt_axis[joint_id]
+                    joint_pos = physics.data.qpos[physics.model.jnt_qposadr[joint_id]]
+                    
+                    # Project error onto joint axis
+                    delta = gain * np.dot(left_error, joint_axis)
+                    
+                    # Update joint position
+                    new_pos = joint_pos + delta
                     # Clamp to joint limits
-                    target_pos = np.clip(target_pos, left_joint_ranges[i][0], left_joint_ranges[i][1])
-                    old_pos = physics.data.qpos[physics.model.jnt_qposadr[joint_id]]
-                    physics.data.qpos[physics.model.jnt_qposadr[joint_id]] = target_pos
+                    new_pos = np.clip(new_pos, left_joint_ranges[i][0], left_joint_ranges[i][1])
+                    physics.data.qpos[physics.model.jnt_qposadr[joint_id]] = new_pos
                 
                 # Update right arm joints
-                # print("\nRight arm joint updates:")
                 for i, joint_id in enumerate(right_joint_ids):
-                    current_pos = physics.data.qpos[physics.model.jnt_qposadr[joint_id]]
-                    error_component = right_error[i % 3]
-                    delta = gain * error_component
-                    target_pos = current_pos + delta
+                    # Calculate joint contribution to end effector position
+                    joint_axis = physics.model.jnt_axis[joint_id]
+                    joint_pos = physics.data.qpos[physics.model.jnt_qposadr[joint_id]]
+                    
+                    # Project error onto joint axis
+                    delta = gain * np.dot(right_error, joint_axis)
+                    
+                    # Update joint position
+                    new_pos = joint_pos + delta
                     # Clamp to joint limits
-                    target_pos = np.clip(target_pos, right_joint_ranges[i][0], right_joint_ranges[i][1])
-                    old_pos = physics.data.qpos[physics.model.jnt_qposadr[joint_id]]
-                    physics.data.qpos[physics.model.jnt_qposadr[joint_id]] = target_pos
-
-                # Forward kinematics to update positions
+                    new_pos = np.clip(new_pos, right_joint_ranges[i][0], right_joint_ranges[i][1])
+                    physics.data.qpos[physics.model.jnt_qposadr[joint_id]] = new_pos
+                
+                # Apply changes and verify new positions
                 physics.forward()
+                
+                # Verify new positions
+                new_left_pos = physics.data.xpos[left_wrist_body]
+                new_right_pos = physics.data.xpos[right_wrist_body]
+                print(f"New wrist positions: Left={new_left_pos}, Right={new_right_pos}")
                 
             else:
                 print(f"Warning: Could not find wrist bodies (left: {left_wrist_body}, right: {right_wrist_body})")
+            
+            print("=== End G1 Arm Update Debug ===\n")
             
         except Exception as e:
             print(f"Error in _update_g1_arms: {e}")
@@ -787,6 +789,25 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
                     continue
                 geom.conaffinity = 0
                 geom.contype = 1
+
+    def _disable_collisions_between_hands_and_g1(self) -> None:
+        """Disable collisions between the shadow hands and G1."""
+        if not hasattr(self, '_g1') or self._g1 is None:
+            return
+            
+        print("\n=== Disabling G1-Hands Collisions ===")
+        
+        # Set G1 to not generate any contacts with hands
+        for geom in self._g1.mjcf_model.find_all('geom'):
+            geom.contype = 0  # Will not generate contacts
+            #dont recieve any contacts
+            geom.conaffinity = 0
+            print(f"Set G1 geom {geom.name} collision: contype=0, conaffinity=0")
+        
+        # Keep hand collision settings as they were (from parent class)
+        # They already have proper collision setup for piano interaction
+        
+        print("=== End Disabling G1-Hands Collisions ===\n")
 
     def _randomize_initial_hand_positions(
         self, physics: mjcf.Physics, random_state: np.random.RandomState
