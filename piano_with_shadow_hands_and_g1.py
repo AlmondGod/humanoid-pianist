@@ -35,7 +35,7 @@ _FINGERTIP_ALPHA = 1.0
 _POSITION_OFFSET = 0.05
 
 # Height offset for all components
-_HEIGHT_OFFSET = 0.8
+_HEIGHT_OFFSET = 0.76
 
 # Modified hand positions - raised higher
 _LEFT_HAND_POSITION = (0.4, -0.15, 0.13 + _HEIGHT_OFFSET)  # Original z=0.13
@@ -56,8 +56,8 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
         super().__init__(*args, **kwargs)
         self._camera_angle = 0.0
         self._camera_radius = 1.0
-        self._camera_height = 2.0
-        self._camera_angular_velocity = 0.0
+        self._camera_height = 1.0
+        self._camera_angular_velocity = 0.01
         self._setup_g1_arm_joints()
         self.add_g1()
         self._disable_collisions_between_hands_and_g1()
@@ -86,7 +86,7 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
             'camera',
             name='panning_camera',
             pos=[self._camera_radius, 0, self._camera_height],
-            quat=self._euler_to_quat(0, 0, 0),  # Point camera towards center
+            quat=self._euler_to_quat(0, 0, 0),  # Point camera horizontally
             mode='fixed'  # Use fixed mode to allow manual control
         )
 
@@ -117,7 +117,7 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
         """Add Unitree G1 robot to the environment."""
         try:
             # Default position behind the piano
-            position = [0.6, 0.0, 0.0]  # x, y, z coordinates
+            position = [0.45, 0.0, 0.0]  # x, y, z coordinates
             
             print("\n=== Adding G1 Debug ===")
             
@@ -168,7 +168,8 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
             if root_id >= 0:
                 # Position G1 behind and slightly above the piano
                 # Account for the height offset
-                base_pos = [0.0, 0.3, 0.7 + self._height_offset]
+                base_pos = [0.0, 0.0, 0.7 + self._height_offset]
+                # base_pos = [0.0, 0.0, 0.0]
                 physics.data.xpos[root_id] = base_pos
                 
                 # Orient G1 to face the piano
@@ -324,8 +325,8 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
         """Update G1 arm positions based on shadow hand positions."""
         try:
             # Debug print statements for hand positions
-            print("\n=== G1 Arm Update Debug ===")
-            print(f"Target hand positions: Left={hand_positions['left']}, Right={hand_positions['right']}")
+            # print("\n=== G1 Arm Update Debug ===")
+            # print(f"Target hand positions: Left={hand_positions['left']}, Right={hand_positions['right']}")
             
             # Get joint IDs and ranges
             left_joint_ids = []
@@ -362,16 +363,16 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
                 left_wrist_pos = physics.data.xpos[left_wrist_body].copy()
                 right_wrist_pos = physics.data.xpos[right_wrist_body].copy()
                 
-                print(f"Current wrist positions: Left={left_wrist_pos}, Right={right_wrist_pos}")
+                # print(f"Current wrist positions: Left={left_wrist_pos}, Right={right_wrist_pos}")
                 
                 # Calculate position errors (difference between target and current positions)
                 left_error = hand_positions['left'] - left_wrist_pos
                 right_error = hand_positions['right'] - right_wrist_pos
                 
-                print(f"Position errors: Left={left_error}, Right={right_error}")
+                # print(f"Position errors: Left={left_error}, Right={right_error}")
                 
                 # Increase gain for more responsive movement
-                gain = 2.0  # Increased for more responsive movement
+                gain = 3.0  # Increased for more responsive movement
                 
                 # Update left arm joints using Jacobian-based IK
                 for i, joint_id in enumerate(left_joint_ids):
@@ -409,12 +410,12 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
                 # Verify new positions
                 new_left_pos = physics.data.xpos[left_wrist_body]
                 new_right_pos = physics.data.xpos[right_wrist_body]
-                print(f"New wrist positions: Left={new_left_pos}, Right={new_right_pos}")
+                # print(f"New wrist positions: Left={new_left_pos}, Right={new_right_pos}")
                 
             else:
                 print(f"Warning: Could not find wrist bodies (left: {left_wrist_body}, right: {right_wrist_body})")
             
-            print("=== End G1 Arm Update Debug ===\n")
+            # print("=== End G1 Arm Update Debug ===\n")
             
         except Exception as e:
             print(f"Error in _update_g1_arms: {e}")
@@ -454,8 +455,8 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
         camera = physics.bind(self._camera)
         camera.pos = [new_x, new_y, self._camera_height]
         
-        # Calculate the direction vector from camera to center point (0,0,0)
-        look_dir = np.array([0 - new_x, 0 - new_y, 0 - self._camera_height])
+        # Calculate look direction vector (pointing horizontally)
+        look_dir = np.array([-new_x, -new_y, 0])  # Point towards center but keep horizontal
         look_dir = look_dir / np.linalg.norm(look_dir)
         
         # Fixed up vector (world up)
@@ -470,7 +471,6 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
         up = up / np.linalg.norm(up)
         
         # Create rotation matrix [right, up, -look_dir]
-        # This ensures the camera maintains its orientation while looking at the center
         rot_matrix = np.array([right, up, -look_dir]).T
         
         # Convert rotation matrix to quaternion
