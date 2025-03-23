@@ -128,8 +128,8 @@ class Args:
     notes: str = ""
     mode: str = "online"
     environment_name: Optional[str] = None
-    midi_file: Optional[Path] = Path("/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid")
-    load_checkpoint: Optional[Path] = Path("/Users/almondgod/Repositories/robopianist/robopianist-rl/models/CruelAngelsThesismiddle15s/SAC-/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid-42-2025-03-03-21-29-41/checkpoint_00920000.pkl")  # Path to checkpoint file for resuming training
+    midi_file: Optional[Path] = Path("/Users/almondgod/Repositories/robopianist/midi_files_cut/Unravel Cut 10s.mid")
+    load_checkpoint: Optional[Path] = Path("/Users/almondgod/Repositories/robopianist/robopianist-rl/models/Unravel10s/SAC-/Users/almondgod/Repositories/robopianist/midi_files_cut/Unravel Cut 10s.mid-42-2025-03-21-18-29-08/checkpoint_00690000.pkl")  # Path to checkpoint file for resuming training
     n_steps_lookahead: int = 10
     trim_silence: bool = False
     gravity_compensation: bool = True

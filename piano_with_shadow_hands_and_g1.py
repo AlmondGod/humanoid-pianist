@@ -21,6 +21,7 @@ from robopianist.music import midi_file
 from robopianist.suite import composite_reward
 from robopianist.suite.tasks import base
 from robopianist.suite.tasks.piano_with_shadow_hands import PianoWithShadowHands
+from loop_rate_limiters import RateLimiter
 
 from g1_entity import G1Entity
 
@@ -352,7 +353,7 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
             task = mink.FrameTask(
                 frame_name=f"g1_29dof_rev_1_0/{hand}",
                 frame_type="body",
-                position_cost=20.0,  # Reduced from 50.0 for smoother motion
+                position_cost=100.0,  # Reduced from 50.0 for smoother motion
                 orientation_cost=0.5,  # Reduced from 1.0
                 lm_damping=5.0,  # Increased from 1.0 for more stability
             )
@@ -431,12 +432,13 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
                     target = mink.SE3(wxyz_xyz=wxyz_xyz)
                     task.set_target(target)
                 
+                rate = RateLimiter(frequency=10.0, warn=False)
+
                 # Solve IK with improved parameters
-                dt = 0.005  # Increased timestep for more stable integration
                 vel = mink.solve_ik(
                     self._mink_config,
                     self._mink_tasks,
-                    dt,
+                    rate.dt,
                     "osqp",
                     damping=10.0,  # Increased damping
                     limits=None
@@ -452,10 +454,10 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
                 
                 # Add acceleration limiting with lower limits
                 if hasattr(self, '_prev_vel'):
-                    acc = (vel - self._prev_vel) / dt
+                    acc = (vel - self._prev_vel) / rate.dt
                     acc_limit = 20.0  # Reduced from 100.0
                     acc_limited = np.clip(acc, -acc_limit, acc_limit)
-                    vel = self._prev_vel + acc_limited * dt
+                    vel = self._prev_vel + acc_limited * rate.dt
                 self._prev_vel = vel.copy()
                 
                 print(f"\nIK Solution:")
@@ -467,9 +469,9 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
                     joint_id = physics.model.name2id(prefix + joint_name, "joint")
                     if joint_id >= 0:
                         print(f"{joint_name}: {vel[joint_id]:.6f}")
-                
+
                 # Apply both position and velocity control
-                self._mink_config.integrate_inplace(vel, dt)
+                self._mink_config.integrate_inplace(vel, rate.dt)
                 
                 # Track final positions and movement
                 print("\nState after IK solve:")
@@ -485,7 +487,7 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
                         
                         # Apply additional velocity-based position correction with higher gain
                         pos_error = new_pos - old_pos
-                        correction_vel = pos_error / dt
+                        correction_vel = pos_error / rate.dt
                         physics.bind(joint_element).qvel += correction_vel * 0.8  # Increased from 0.5
                         
                         delta = new_pos - old_pos
