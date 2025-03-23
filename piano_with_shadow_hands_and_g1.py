@@ -61,7 +61,7 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
         self._camera_angle = 0.0
         self._camera_radius = 1.0
         self._camera_height = 1.0
-        self._camera_angular_velocity = 0.01
+        self._camera_angular_velocity = 0.0
         self._setup_g1_arm_joints()
         self.add_g1()
         self._disable_collisions_between_hands_and_g1()
@@ -94,7 +94,7 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
         self._camera = self._arena.mjcf_model.worldbody.add(
             'camera',
             name='panning_camera',
-            pos=[self._camera_radius, 0, self._camera_height],
+            pos=[0, self._camera_radius, self._camera_height],
             quat=self._euler_to_quat(0, 0, 0),  # Point camera horizontally
             mode='fixed'  # Use fixed mode to allow manual control
         )
@@ -287,7 +287,7 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
         positions['left'] += forearm_to_wrist_offset
         positions['right'] += forearm_to_wrist_offset
 
-        print(f"positions: {positions}")
+        print(f"shadow hand positions: {positions}")
         
         return positions
 
@@ -371,33 +371,20 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
                 self._initialize_mink(physics)
             
             try:
-                print("\n=== Updating G1 Arms ===")
-                
                 # Get current joint positions from physics
                 prefix = "g1_29dof_rev_1_0/"
                 all_joints = self._left_arm_joints + self._right_arm_joints
                 current_q = np.zeros(self._mink_config.nq)
                 
                 # Track all joint positions and velocities before update
-                print("\nState before IK solve:")
                 for joint_name in all_joints:
                     full_joint_name = prefix + joint_name
                     joint_id = physics.model.name2id(full_joint_name, "joint")
                     if joint_id >= 0:
                         current_q[joint_id] = physics.data.qpos[joint_id]
-                        current_vel = physics.data.qvel[joint_id]
-                        print(f"{joint_name}:")
-                        print(f"  Position: {physics.data.qpos[joint_id]:.6f}")
-                        print(f"  Velocity: {current_vel:.6f}")
                 
-                # Update mink configuration with current joint positions
+                # Always start from current position
                 self._mink_config.update(q=current_q)
-                
-                # Print initial hand positions for verification
-                print("\n=== Hand Position Debug ===")
-                print(f"Shadow hand positions:")
-                print(f"  Left hand: {hand_positions['left']}")
-                print(f"  Right hand: {hand_positions['right']}")
                 
                 # Update hand task targets with higher gains for better tracking
                 hand_mapping = {
@@ -405,26 +392,7 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
                     'left': hand_positions['left']
                 }
                 
-                print("\n=== Task Assignment Debug ===")
                 for i, (task, side) in enumerate(zip(self._mink_tasks, ['right', 'left'])):
-                    print(f"\nTask {i} Debug:")
-                    print(f"Assigned to: {side} arm")
-                    frame_name = f"g1_29dof_rev_1_0/{side}_wrist_yaw_link"
-                    frame_id = physics.model.name2id(frame_name, "body")
-                    current_pos = physics.data.xpos[frame_id]
-                    target_pos = hand_mapping[side]
-                    
-                    print(f"Frame name: {frame_name}")
-                    print(f"Current position: {current_pos}")
-                    print(f"Target position: {target_pos}")
-                    print(f"Distance to target: {np.linalg.norm(target_pos - current_pos):.6f}")
-                    
-                    # Print relative position to verify crossing
-                    if side == 'right':
-                        print(f"Right arm Y position: {current_pos[1]:.6f} (should be positive)")
-                    else:
-                        print(f"Left arm Y position: {current_pos[1]:.6f} (should be negative)")
-                    
                     wxyz_xyz = np.zeros(7)
                     wxyz_xyz[0] = 1.0  # w component of quaternion
                     wxyz_xyz[4:] = hand_mapping[side]  # xyz position
@@ -460,11 +428,7 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
                     vel = self._prev_vel + acc_limited * rate.dt
                 self._prev_vel = vel.copy()
                 
-                print(f"\nIK Solution:")
-                print(f"Velocity norm: {np.linalg.norm(vel):.6f}")
-                
                 # Print velocity commands for each joint
-                print("\nVelocity commands:")
                 for i, joint_name in enumerate(all_joints):
                     joint_id = physics.model.name2id(prefix + joint_name, "joint")
                     if joint_id >= 0:
@@ -473,8 +437,6 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
                 # Apply both position and velocity control
                 self._mink_config.integrate_inplace(vel, rate.dt)
                 
-                # Track final positions and movement
-                print("\nState after IK solve:")
                 for joint_name in all_joints:
                     joint_element = self._g1.mjcf_model.find('joint', joint_name)
                     if joint_element is not None:
@@ -490,12 +452,6 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
                         correction_vel = pos_error / rate.dt
                         physics.bind(joint_element).qvel += correction_vel * 0.8  # Increased from 0.5
                         
-                        delta = new_pos - old_pos
-                        print(f"{joint_name}:")
-                        print(f"  Old pos: {old_pos:.6f}")
-                        print(f"  New pos: {new_pos:.6f}")
-                        print(f"  Delta: {delta:.6f}")
-                        print(f"  Current vel: {physics.bind(joint_element).qvel[0]:.6f}")  # Get first element for velocity
                     else:
                         print(f"Warning: Could not find joint element for {joint_name}")
 
@@ -505,8 +461,6 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
                     joint_element = self._g1.mjcf_model.find('joint', joint_name)
                     if joint_element is not None:
                         self._last_velocities[joint_name] = physics.bind(joint_element).qvel[0]
-
-                print("\n=== End Updating G1 Arms ===\n")
 
             except Exception as e:
                 print(f"Error in _update_g1_arms inner try block: {str(e)}")
