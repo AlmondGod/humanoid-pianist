@@ -151,7 +151,6 @@ class Args:
     action_reward_observation: bool = True
     agent_config: sac.SACConfig = sac.SACConfig()
     algorithm: Literal["sac"] = "sac"  # Add QTOpt option
-    add_unitree_g1: bool = False
     unitree_g1_path: Optional[str] = "/Users/almondgod/Repositories/robopianist/robopianist-rl/mujoco_menagerie/unitree_g1/g1_modified.xml"
     unitree_position: Tuple[float, float, float] = (0.0, 0.4, 0.7)
 
@@ -210,12 +209,6 @@ def get_env(args: Args, record_dir: Optional[Path] = None):
     env = wrappers.SinglePrecisionWrapper(env)
     env = wrappers.DmControlWrapper(env)
     
-    # Add G1 wrapper if specified
-    if getattr(args, 'add_unitree_g1', False):
-        g1_position = getattr(args, 'unitree_position', (0.0, 0.4, 0.7))
-        g1_model_path = getattr(args, 'unitree_g1_path', None)
-        env = UnitreeG1Wrapper(env, model_path=g1_model_path, position=g1_position)
-    
     return env
 
 
@@ -242,16 +235,10 @@ def main(args: Args) -> None:
     env = get_env(args)
     eval_env = get_env(args, record_dir=save_dir)
 
-    # Add these debug lines to print observation dimensions
-    print("=" * 50)
+    
     timestep = env.reset()
-    print(f"ENVIRONMENT OBSERVATION SHAPE: {timestep.observation.shape}")
-    print(f"OBSERVATION FIRST 10 VALUES: {timestep.observation[:10]}")
-    print("=" * 50)
 
     spec = specs.EnvironmentSpec.make(env)
-    print(f"SPEC OBSERVATION DIM: {spec.observation_dim}")
-    print("=" * 50)
 
     # Initialize agent based on algorithm choice
     if args.algorithm == "sac":
@@ -291,208 +278,6 @@ def main(args: Args) -> None:
         timestep = eval_env.step(agent.eval_actions(timestep.observation))
 
     print(f"Evaluation complete. Stats: {eval_env.get_statistics()}")
-
-
-# Add G1Entity class
-class G1Entity(Entity):
-    """Entity wrapper for Unitree G1 model."""
-
-    def __init__(self, model_path):
-        """Initialize G1Entity.
-
-        Args:
-            model_path: Path to the G1 model XML file
-        """
-        self._model_path = model_path
-        self._attached = []
-        self._observables = {}
-        
-        # Fix the XML file by removing keyframes and fixing mesh paths
-        import tempfile
-        import xml.etree.ElementTree as ET
-        import os
-        
-        try:
-            print(f"Preprocessing G1 model XML file...")
-            tree = ET.parse(model_path)
-            root = tree.getroot()
-            
-            # Find the compiler element and update meshdir to absolute path
-            original_dir = os.path.dirname(model_path)
-            assets_dir = os.path.join(original_dir, "assets")
-            compilers = root.findall(".//compiler")
-            
-            modifications_made = False
-            
-            if compilers:
-                for compiler in compilers:
-                    if 'meshdir' in compiler.attrib:
-                        print(f"Updating meshdir from '{compiler.attrib['meshdir']}' to '{assets_dir}'")
-                        compiler.attrib['meshdir'] = assets_dir
-                        modifications_made = True
-            
-            # Find and remove all keyframe elements
-            keyframes = root.findall(".//keyframe")
-            if keyframes:
-                for keyframe in keyframes:
-                    print(f"Removing keyframe element to prevent qpos size mismatch")
-                    # Find the parent of the keyframe and remove the keyframe
-                    parent_map = {c: p for p in tree.iter() for c in p}
-                    if keyframe in parent_map:
-                        parent_map[keyframe].remove(keyframe)
-                        modifications_made = True
-            
-            # Find and remove all freejoint elements
-            freejoints = root.findall(".//freejoint")
-            if freejoints:
-                for freejoint in freejoints:
-                    print(f"Removing freejoint element to prevent 'free joint can only be used on top level' error")
-                    # Find the parent of the freejoint and remove the freejoint
-                    parent_map = {c: p for p in tree.iter() for c in p}
-                    if freejoint in parent_map:
-                        parent_map[freejoint].remove(freejoint)
-                        modifications_made = True
-            
-            if modifications_made:
-                # Create a temporary file to save the modified XML
-                with tempfile.NamedTemporaryFile(suffix='.xml', delete=False) as tmp_file:
-                    tmp_path = tmp_file.name
-                    print(f"Writing modified G1 model to temporary file: {tmp_path}")
-                    tree.write(tmp_path)
-                    self._model_path = tmp_path
-            else:
-                print("No modifications needed to the G1 model file")
-        except Exception as e:
-            print(f"Error preprocessing G1 model XML: {e}")
-            print("Will try to load the original file anyway")
-        
-        # Now load the modified model
-        try:
-            self._mjcf_model = mjcf.from_path(self._model_path)
-            print("Successfully loaded G1 model with MJCF API")
-        except Exception as e:
-            print(f"Error loading G1 model with MJCF API: {e}")
-            
-            # One last attempt - try loading with direct asset path mapping
-            try:
-                print("Trying alternative loading method with asset overrides...")
-                assets = {}
-                if os.path.exists(assets_dir):
-                    # Load all STL files in the assets directory
-                    for filename in os.listdir(assets_dir):
-                        if filename.lower().endswith('.stl'):
-                            file_path = os.path.join(assets_dir, filename)
-                            assets[filename] = open(file_path, 'rb').read()
-                            print(f"Added asset: {filename}")
-                
-                self._mjcf_model = mjcf.from_path(model_path, assets=assets)
-                print("Successfully loaded G1 model with asset overrides")
-            except Exception as asset_error:
-                print(f"All attempts to load G1 model failed: {asset_error}")
-                raise
-
-    @property
-    def mjcf_model(self):
-        return self._mjcf_model
-    
-    def _build(self):
-        pass
-    
-    def initialize_episode(self, physics, random_state):
-        pass
-        
-    @property
-    def actuators(self):
-        return self._actuators
-        
-    @property
-    def observables(self):
-        class ObservablesWrapper:
-            def __init__(self, obs_dict):
-                self._obs_dict = obs_dict
-            def as_dict(self):
-                return self._obs_dict
-        return ObservablesWrapper(self._observables)
-
-# Add G1 wrapper
-class UnitreeG1Wrapper(wrappers.DmControlWrapper):
-    """Wrapper that adds a Unitree G1 robot to the environment."""
-    
-    def __init__(self, env, model_path=None, position=(0.0, 0.0, 0.0)):
-        super().__init__(env)
-        self._model_path = model_path
-        self._position = position
-        self._g1_entity = None
-        self._add_g1_to_env()
-
-    def _add_g1_to_env(self):
-        """Add G1 robot to the environment."""
-        if self._model_path is None:
-            # Try standard locations
-            potential_paths = [
-                "mujoco_menagerie/unitree_g1/g1.xml",
-                os.path.expanduser("~/mujoco_menagerie/unitree_g1/g1.xml"),
-                "/usr/local/share/mujoco_menagerie/unitree_g1/g1.xml",
-            ]
-            
-            for path in potential_paths:
-                if os.path.exists(path):
-                    self._model_path = path
-                    print(f"Found G1 model at {path}")
-                    break
-                    
-            if self._model_path is None:
-                raise ValueError("Could not find Unitree G1 model. Please specify model_path.")
-
-        try:
-            # Get the arena from the environment - use self.environment instead of self._env
-            arena = self.environment.task.arena
-            
-            # Create G1 entity
-            self._g1_entity = G1Entity(self._model_path)
-            
-            # Create attachment site
-            attachment_site = arena.mjcf_model.worldbody.add(
-                'site',
-                name='g1_attachment',
-                size=[0.01, 0.01, 0.01],
-                pos=self._position
-            )
-            
-            # Attach G1 to arena
-            arena.attach(self._g1_entity, attachment_site)
-            print("Successfully added G1 to environment")
-            
-        except Exception as e:
-            print(f"Error adding G1 to environment: {e}")
-            import traceback
-            traceback.print_exc()  # Print full traceback for debugging
-            self._g1_entity = None
-
-    def reset(self, *args, **kwargs):
-        timestep = super().reset(*args, **kwargs)
-        
-        # Set G1 orientation on reset
-        if self._g1_entity is not None:
-            try:
-                # Use self.environment instead of self._env
-                physics = self.environment.physics
-                body_name = "g1_29dof_rev_1_0/pelvis"
-                pelvis_id = physics.model.name2id(body_name, "body")
-                
-                if pelvis_id >= 0:
-                    # Set position and orientation
-                    physics.data.xpos[pelvis_id] = self._position
-                    # 180-degree rotation around Z axis
-                    physics.data.xquat[pelvis_id] = [0, 0, 0, 1]
-                    physics.forward()
-            except Exception as e:
-                print(f"Warning: Could not set G1 orientation: {e}")
-                import traceback
-                traceback.print_exc()  # Print full traceback for debugging
-                
-        return timestep
-
 
 if __name__ == "__main__":
     main(tyro.cli(Args, description=__doc__))

@@ -93,7 +93,6 @@ class G1Entity(composer.Entity):
             if compilers:
                 for compiler in compilers:
                     if 'meshdir' in compiler.attrib:
-                        print(f"Updating meshdir from '{compiler.attrib['meshdir']}' to '{assets_dir}'")
                         compiler.attrib['meshdir'] = assets_dir
                         modifications_made = True
             
@@ -101,7 +100,6 @@ class G1Entity(composer.Entity):
             keyframes = root.findall(".//keyframe")
             if keyframes:
                 for keyframe in keyframes:
-                    print(f"Removing keyframe element to prevent qpos size mismatch")
                     parent_map = {c: p for p in tree.iter() for c in p}
                     if keyframe in parent_map:
                         parent_map[keyframe].remove(keyframe)
@@ -111,7 +109,6 @@ class G1Entity(composer.Entity):
             freejoints = root.findall(".//freejoint")
             if freejoints:
                 for freejoint in freejoints:
-                    print(f"Removing freejoint element")
                     parent_map = {c: p for p in tree.iter() for c in p}
                     if freejoint in parent_map:
                         parent_map[freejoint].remove(freejoint)
@@ -120,7 +117,6 @@ class G1Entity(composer.Entity):
             if modifications_made:
                 with tempfile.NamedTemporaryFile(suffix='.xml', delete=False) as tmp_file:
                     tmp_path = tmp_file.name
-                    print(f"Writing modified G1 model to temporary file: {tmp_path}")
                     tree.write(tmp_path)
                     self._model_path = tmp_path
             else:
@@ -129,12 +125,6 @@ class G1Entity(composer.Entity):
             # Load the MJCF model here
             self._mjcf_root = mjcf.from_path(self._model_path)
             print("Successfully loaded G1 model")
-            
-            # Debug: Print all body names in the model
-            print("\nAvailable bodies in the model:")
-            for body in self._mjcf_root.find_all('body'):
-                print(f"  - {body.name}")
-            print()
             
         except Exception as e:
             print(f"Error preprocessing G1 model XML: {e}")
