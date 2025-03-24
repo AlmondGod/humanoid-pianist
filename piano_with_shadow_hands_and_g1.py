@@ -58,10 +58,10 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
         sys.modules['robopianist.suite.tasks.base']._RIGHT_HAND_POSITION = _RIGHT_HAND_POSITION
         
         super().__init__(*args, **kwargs)
-        self._camera_angle = 0.0
-        self._camera_radius = 1.0
+        self._camera_angle = 2.2
+        self._camera_radius = 0.4
         self._camera_height = 1.0
-        self._camera_angular_velocity = 0.0
+        self._camera_angular_velocity = 0.003
         self._setup_g1_arm_joints()
         self.add_g1()
         self._disable_collisions_between_hands_and_g1()
@@ -128,8 +128,6 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
             # Default position behind the piano
             position = [0.45, 0.0, 0.0]  # x, y, z coordinates
             
-            print("\n=== Adding G1 Debug ===")
-            
             # Create attachment site with unique name and rotated orientation
             site_name = f'g1_attachment_{id(self)}'  # Use unique identifier
             attachment_site = self._arena.mjcf_model.worldbody.add(
@@ -139,7 +137,6 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
                 pos=position,
                 euler=[0, 0, 3.14159]  # Rotate 180 degrees around Z axis (in radians)
             )
-            print(f"Created attachment site with rotation")
 
             # Find the G1 model path
             model_path = self._find_g1_model()
@@ -152,9 +149,6 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
             
             # Store G1 entity reference
             self._g1 = g1_entity
-            
-            print("Successfully added G1 to environment")
-            print("=== End Adding G1 Debug ===\n")
             
         except Exception as e:
             print(f"Error adding G1 to environment: {e}")
@@ -178,11 +172,18 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
                 # Position G1 behind and slightly above the piano
                 # Account for the height offset
                 base_pos = [0.0, 0.0, 0.7 + self._height_offset]
-                # base_pos = [0.0, 0.0, 0.0]
                 physics.data.xpos[root_id] = base_pos
                 
                 # Orient G1 to face the piano
                 physics.data.xquat[root_id] = [0, 0, 1, 0]  # 180° around Y axis
+                
+                # Set waist pitch joint to angle head downward
+                waist_pitch_joint = self._g1.mjcf_model.find('joint', 'waist_pitch_joint')
+                if waist_pitch_joint is not None:
+                    # Set to -0.2 radians (about 11.5 degrees) downward
+                    physics.bind(waist_pitch_joint).qpos = -0.2
+                else:
+                    raise ValueError("Warning: Could not find waist pitch joint")
                 
                 # Get hand positions for initial arm positioning
                 hand_positions = self._get_shadow_hand_positions(physics)
@@ -230,7 +231,7 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
         print("mink initialized")
         
         # Reset and update camera
-        self._camera_angle = 0.0
+        self._camera_angle = 2.2
         camera = physics.bind(self._camera)
         camera.pos = [self._camera_radius, 0, self._camera_height]
         camera.quat = self._euler_to_quat(0, 1.0, 0)
@@ -511,15 +512,16 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
 
         # Update camera position - only rotate in the horizontal plane
         self._camera_angle += self._camera_angular_velocity
-        new_x = self._camera_radius * np.cos(self._camera_angle)
-        new_y = self._camera_radius * np.sin(self._camera_angle)
+        # self._camera_angle = 2.2
+        new_x = (self._camera_radius * np.cos(self._camera_angle)) - 0.6
+        new_y = (self._camera_radius * np.sin(self._camera_angle)) + 0.2
         
         # Update camera position in physics
         camera = physics.bind(self._camera)
-        camera.pos = [new_x, new_y, self._camera_height]
+        camera.pos = [new_x, new_y, self._camera_height + 0.3]
         
         # Calculate look direction vector (pointing horizontally)
-        look_dir = np.array([-new_x, -new_y, 0])  # Point towards center but keep horizontal
+        look_dir = np.array([-new_x, -new_y + 0.15, -0.18])  # Point towards center but keep horizontal
         look_dir = look_dir / np.linalg.norm(look_dir)
         
         # Fixed up vector (world up)
