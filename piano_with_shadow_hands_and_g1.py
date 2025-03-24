@@ -278,17 +278,17 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
         """Get the current positions of both shadow hands."""
         positions = {}
         
+        print("\n=== Shadow Hand Position Calculation ===")
         # Get palm/forearm positions for both hands using root_body
-        positions['left'] = physics.bind(self.left_hand.root_body).xpos.copy()
-        positions['right'] = physics.bind(self.right_hand.root_body).xpos.copy()
-        
-        # Add offset to move target position from forearm to approximate wrist position
-        # The shadow hand's forearm is about 0.1m long, so move the target forward
-        forearm_to_wrist_offset = np.array([0, 0, 0])
-        positions['left'] += forearm_to_wrist_offset
-        positions['right'] += forearm_to_wrist_offset
-
-        print(f"shadow hand positions: {positions}")
+        for side, hand in [('left', self.left_hand), ('right', self.right_hand)]:
+            root_pos = physics.bind(hand.root_body).xpos.copy()
+            print(f"{side} hand root position: {root_pos}")
+            
+            # Add offset to move target position from forearm to approximate wrist position
+            # The shadow hand's forearm is about 0.1m long, so move the target forward
+            forearm_to_wrist_offset = np.array([0.1, 0, 0])  # Added 10cm forward offset
+            positions[side] = root_pos + forearm_to_wrist_offset
+            print(f"{side} hand target position (with offset): {positions[side]}")
         
         return positions
 
@@ -344,25 +344,24 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
         # Create configuration from model
         self._mink_config = mink.Configuration(physics.model.ptr)
 
-        print("mink config created")
-        
-        # Create tasks for both hands
+        # Create tasks for both hands with adjusted parameters
         self._mink_tasks = []
-        
-        # Add frame tasks for both hands - right first, then left
-        for hand in ["right_wrist_yaw_link", "left_wrist_yaw_link"]:  # Changed order to right first
+        for hand in ["right_wrist_yaw_link", "left_wrist_yaw_link"]:
             task = mink.FrameTask(
                 frame_name=f"g1_29dof_rev_1_0/{hand}",
                 frame_type="body",
-                position_cost=100.0,  # Reduced from 50.0 for smoother motion
-                orientation_cost=0.5,  # Reduced from 1.0
-                lm_damping=5.0,  # Increased from 1.0 for more stability
+                position_cost=2000.0,  # Doubled for even more aggressive tracking
+                orientation_cost=0.0,   # No orientation cost - focus purely on position
+                lm_damping=0.5,        # Much lower damping for more aggressive movement
             )
             self._mink_tasks.append(task)
         
-        # Set limits to None to disable them
-        self._mink_limits = None
-        print("mink initialization complete")
+        # Create configuration limits with safety margin
+        self._joint_limits = [mink.ConfigurationLimit(
+            model=physics.model.ptr,
+            gain=0.995,  # Even higher gain
+            min_distance_from_limits=0.02  # Reduced safety margin
+        )]
 
     def _update_g1_arms(self, physics: mjcf.Physics, hand_positions: dict) -> None:
         """Update G1 arm positions using mink IK solver."""
@@ -371,105 +370,130 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
             if not hasattr(self, '_mink_config') or self._mink_config is None:
                 self._initialize_mink(physics)
             
-            try:
-                # Get current joint positions from physics
-                prefix = "g1_29dof_rev_1_0/"
-                all_joints = self._left_arm_joints + self._right_arm_joints
-                current_q = np.zeros(self._mink_config.nq)
-                
-                # Track all joint positions and velocities before update
-                for joint_name in all_joints:
-                    full_joint_name = prefix + joint_name
-                    joint_id = physics.model.name2id(full_joint_name, "joint")
-                    if joint_id >= 0:
-                        current_q[joint_id] = physics.data.qpos[joint_id]
-                
-                # Always start from current position
-                self._mink_config.update(q=current_q)
-                
-                # Update hand task targets with higher gains for better tracking
-                hand_mapping = {
-                    'right': hand_positions['right'],
-                    'left': hand_positions['left']
-                }
-                
-                for i, (task, side) in enumerate(zip(self._mink_tasks, ['right', 'left'])):
-                    wxyz_xyz = np.zeros(7)
-                    wxyz_xyz[0] = 1.0  # w component of quaternion
-                    wxyz_xyz[4:] = hand_mapping[side]  # xyz position
-                    
-                    target = mink.SE3(wxyz_xyz=wxyz_xyz)
-                    task.set_target(target)
-                
-                rate = RateLimiter(frequency=10.0, warn=False)
+            # Create hand mapping with adjusted targets - explicitly create new arrays
+            hand_mapping = {
+                'right': np.array([hand_positions['right'][0] - 0.2, hand_positions['right'][1], hand_positions['right'][2]]),
+                'left': np.array([hand_positions['left'][0] - 0.2, hand_positions['left'][1], hand_positions['left'][2]])
+            }
+            
+            # Get current end effector positions and adjusted targets
+            for side in ['right', 'left']:
+                wrist_body = physics.bind(self._g1.mjcf_model.find('body', f'{side}_wrist_yaw_link'))
+                current_pos = wrist_body.xpos
+                target_pos = hand_mapping[side]  # Use adjusted targets
+                error = np.linalg.norm(target_pos - current_pos)
+                print(f"\n{side.capitalize()} arm:")
+                print(f"  Original target: {hand_positions[side]}")
+                print(f"  Adjusted target: {target_pos}")
+                print(f"  Current: {current_pos}")
+                print(f"  Error: {error:.4f}m")
 
-                # Solve IK with improved parameters
+            # Get current joint positions
+            prefix = "g1_29dof_rev_1_0/"
+            all_joints = self._left_arm_joints + self._right_arm_joints
+            current_q = np.zeros(self._mink_config.nq)
+            
+            for joint_name in all_joints:
+                full_joint_name = prefix + joint_name
+                joint_id = physics.model.name2id(full_joint_name, "joint")
+                if joint_id >= 0:
+                    current_q[joint_id] = physics.data.qpos[joint_id]
+            
+            # Start from current position
+            self._mink_config.update(q=current_q)
+            
+            # Update hand task targets with adjusted positions
+            for i, (task, side) in enumerate(zip(self._mink_tasks, ['right', 'left'])):
+                wxyz_xyz = np.zeros(7)
+                wxyz_xyz[0] = 1.0  # w component of quaternion
+                wxyz_xyz[4:] = hand_mapping[side]  # Use adjusted xyz position
+                target = mink.SE3(wxyz_xyz=wxyz_xyz)
+                task.set_target(target)
+                print(f"\nSetting {side} task target to: {hand_mapping[side]}")
+            
+            rate = RateLimiter(frequency=20.0, warn=False)
+
+            # Solve IK with joint limits - with error handling
+            vel = mink.solve_ik(
+                self._mink_config,
+                self._mink_tasks,
+                rate.dt,
+                "osqp",
+                damping=0.5,  # Much lower damping for aggressive movement
+                # limits=self._joint_limits
+                limits=None
+            )
+            
+            if vel is None:
+                print("IK solver failed to find a solution. Trying with higher damping...")
+                # Try again with higher damping but still more aggressive than before
                 vel = mink.solve_ik(
                     self._mink_config,
                     self._mink_tasks,
                     rate.dt,
                     "osqp",
-                    damping=10.0,  # Increased damping
-                    limits=None
+                    damping=2.0,  # Higher fallback damping but still aggressive
+                    limits=self._joint_limits
                 )
                 
-                # Scale velocities more conservatively
-                vel_scale = 2.0  # Reduced from 10.0
-                vel = vel * vel_scale
-                
-                # Apply stricter velocity limits
-                vel_limit = 2.0  # Reduced from 10.0
-                vel = np.clip(vel, -vel_limit, vel_limit)
-                
-                # Add acceleration limiting with lower limits
-                if hasattr(self, '_prev_vel'):
-                    acc = (vel - self._prev_vel) / rate.dt
-                    acc_limit = 20.0  # Reduced from 100.0
-                    acc_limited = np.clip(acc, -acc_limit, acc_limit)
-                    vel = self._prev_vel + acc_limited * rate.dt
-                self._prev_vel = vel.copy()
-                
-                # Print velocity commands for each joint
-                for i, joint_name in enumerate(all_joints):
-                    joint_id = physics.model.name2id(prefix + joint_name, "joint")
-                    if joint_id >= 0:
-                        print(f"{joint_name}: {vel[joint_id]:.6f}")
-
-                # Apply both position and velocity control
-                self._mink_config.integrate_inplace(vel, rate.dt)
-                
-                for joint_name in all_joints:
-                    joint_element = self._g1.mjcf_model.find('joint', joint_name)
-                    if joint_element is not None:
-                        old_pos = physics.bind(joint_element).qpos[0]  # Get first (and only) element
-                        new_pos = float(self._mink_config.q[physics.model.name2id(prefix + joint_name, "joint")])
-                        
-                        # Apply position and velocity directly to physics
-                        physics.bind(joint_element).qpos = new_pos
-                        physics.bind(joint_element).qvel = float(vel[physics.model.name2id(prefix + joint_name, "joint")])
-                        
-                        # Apply additional velocity-based position correction with higher gain
-                        pos_error = new_pos - old_pos
-                        correction_vel = pos_error / rate.dt
-                        physics.bind(joint_element).qvel += correction_vel * 0.8  # Increased from 0.5
-                        
-                    else:
-                        print(f"Warning: Could not find joint element for {joint_name}")
-
-                # Store velocities for use between IK updates
-                self._last_velocities = {}
-                for joint_name in all_joints:
-                    joint_element = self._g1.mjcf_model.find('joint', joint_name)
-                    if joint_element is not None:
-                        self._last_velocities[joint_name] = physics.bind(joint_element).qvel[0]
-
-            except Exception as e:
-                print(f"Error in _update_g1_arms inner try block: {str(e)}")
-                import traceback
-                traceback.print_exc()
+                if vel is None:
+                    print("IK solver still failed. Skipping this update.")
+                    return
             
+            print("\n=== IK Solution ===")
+            print(f"Max commanded velocity: {np.max(np.abs(vel)):.4f}")
+            print(f"Mean commanded velocity: {np.mean(np.abs(vel)):.4f}")
+            
+            # Scale velocities - more aggressive now
+            vel_scale = 4.0  # Increased from 1.0
+            vel = vel * vel_scale
+            vel_limit = 6.0  # Increased from 1.5
+            vel = np.clip(vel, -vel_limit, vel_limit)
+            
+            # Apply acceleration limiting
+            if hasattr(self, '_prev_vel'):
+                acc = (vel - self._prev_vel) / rate.dt
+                acc_limit = 60.0  # Increased from 15.0
+                acc_limited = np.clip(acc, -acc_limit, acc_limit)
+                vel = self._prev_vel + acc_limited * rate.dt
+            self._prev_vel = vel.copy()
+            
+            # Apply velocities and integrate
+            self._mink_config.integrate_inplace(vel, rate.dt)
+            
+            print("\n=== Position Updates ===")
+            for joint_name in all_joints:
+                joint_element = self._g1.mjcf_model.find('joint', joint_name)
+                if joint_element is not None:
+                    old_pos = physics.bind(joint_element).qpos[0]
+                    new_pos = float(self._mink_config.q[physics.model.name2id(prefix + joint_name, "joint")])
+                    delta = new_pos - old_pos
+                    
+                    # Apply position and velocity
+                    physics.bind(joint_element).qpos = new_pos
+                    physics.bind(joint_element).qvel = float(vel[physics.model.name2id(prefix + joint_name, 'joint')])
+                    
+                    if abs(delta) > 0.001:  # Only print significant changes
+                        print(f"Joint {joint_name}:")
+                        print(f"  Delta: {delta:.4f}")
+                        print(f"  Velocity: {vel[physics.model.name2id(prefix + joint_name, 'joint')]:.4f}")
+
+            # Store velocities for use between IK updates
+            self._last_velocities = {}
+            for joint_name in all_joints:
+                joint_element = self._g1.mjcf_model.find('joint', joint_name)
+                if joint_element is not None:
+                    self._last_velocities[joint_name] = physics.bind(joint_element).qvel[0]
+
+            print("\n=== Final Error ===")
+            for side in ['right', 'left']:
+                wrist_body = physics.bind(self._g1.mjcf_model.find('body', f'{side}_wrist_yaw_link'))
+                final_pos = wrist_body.xpos
+                error = np.linalg.norm(hand_mapping[side] - final_pos)  # Compare against adjusted target
+                print(f"{side.capitalize()} arm final error: {error:.4f}m")
+
         except Exception as e:
-            print(f"Error in _update_g1_arms outer try block: {str(e)}")
+            print(f"Error in _update_g1_arms: {str(e)}")
             import traceback
             traceback.print_exc()
 
