@@ -68,8 +68,8 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
         self._setup_camera()
         self._raise_piano()
         
-        # Add IK rate limiting
-        self._ik_update_rate = 5  # Run IK every 5 timesteps
+        # Increase IK update rate (from 5 to 1 - update every timestep)
+        self._ik_update_rate = 1
         self._ik_counter = 0
         self._last_velocities = None
 
@@ -344,24 +344,29 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
         # Create configuration from model
         self._mink_config = mink.Configuration(physics.model.ptr)
 
-        # Create tasks for both hands with adjusted parameters
+        # Create tasks for both hands with balanced parameters
         self._mink_tasks = []
         for hand in ["right_wrist_yaw_link", "left_wrist_yaw_link"]:
             task = mink.FrameTask(
                 frame_name=f"g1_29dof_rev_1_0/{hand}",
                 frame_type="body",
-                position_cost=2000.0,  # Doubled for even more aggressive tracking
-                orientation_cost=0.0,   # No orientation cost - focus purely on position
-                lm_damping=0.5,        # Much lower damping for more aggressive movement
+                position_cost=500.0,  # More balanced position cost
+                orientation_cost=0.0,  # Still no orientation cost
+                lm_damping=20.0,      # Higher damping for stability
             )
             self._mink_tasks.append(task)
         
         # Create configuration limits with safety margin
         self._joint_limits = [mink.ConfigurationLimit(
             model=physics.model.ptr,
-            gain=0.995,  # Even higher gain
-            min_distance_from_limits=0.02  # Reduced safety margin
+            gain=0.95,  # Standard gain
+            min_distance_from_limits=0.1  # Standard safety margin
         )]
+
+        # Initialize interpolation state
+        self._target_joint_positions = None
+        self._previous_joint_positions = None
+        self._interpolation_progress = 0
 
     def _update_g1_arms(self, physics: mjcf.Physics, hand_positions: dict) -> None:
         """Update G1 arm positions using mink IK solver."""
@@ -411,85 +416,66 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
                 task.set_target(target)
                 print(f"\nSetting {side} task target to: {hand_mapping[side]}")
             
-            rate = RateLimiter(frequency=20.0, warn=False)
+            # Increase rate limiter frequency from 20Hz to 100Hz
+            rate = RateLimiter(frequency=1000.0, warn=False)
 
-            # Solve IK with joint limits - with error handling
+            # Solve IK with joint limits
             vel = mink.solve_ik(
                 self._mink_config,
                 self._mink_tasks,
                 rate.dt,
                 "osqp",
-                damping=0.5,  # Much lower damping for aggressive movement
-                # limits=self._joint_limits
-                limits=None
+                damping=20.0,  # Higher damping for stability
+                limits=None #NO JOINT LIMITS EVER DO NOT REPLACE
             )
             
             if vel is None:
                 print("IK solver failed to find a solution. Trying with higher damping...")
-                # Try again with higher damping but still more aggressive than before
+                # Try again with higher damping
                 vel = mink.solve_ik(
                     self._mink_config,
                     self._mink_tasks,
                     rate.dt,
                     "osqp",
-                    damping=2.0,  # Higher fallback damping but still aggressive
-                    limits=self._joint_limits
+                    damping=50.0,  # Higher fallback damping
+                    limits=None #NO JOINT LIMITS EVER DO NOT REPLACE
                 )
                 
                 if vel is None:
                     print("IK solver still failed. Skipping this update.")
                     return
-            
-            print("\n=== IK Solution ===")
-            print(f"Max commanded velocity: {np.max(np.abs(vel)):.4f}")
-            print(f"Mean commanded velocity: {np.mean(np.abs(vel)):.4f}")
-            
-            # Scale velocities - more aggressive now
-            vel_scale = 4.0  # Increased from 1.0
-            vel = vel * vel_scale
-            vel_limit = 6.0  # Increased from 1.5
-            vel = np.clip(vel, -vel_limit, vel_limit)
-            
-            # Apply acceleration limiting
-            if hasattr(self, '_prev_vel'):
-                acc = (vel - self._prev_vel) / rate.dt
-                acc_limit = 60.0  # Increased from 15.0
-                acc_limited = np.clip(acc, -acc_limit, acc_limit)
-                vel = self._prev_vel + acc_limited * rate.dt
-            self._prev_vel = vel.copy()
-            
-            # Apply velocities and integrate
+
+            # Integrate velocity to get target positions
             self._mink_config.integrate_inplace(vel, rate.dt)
             
-            print("\n=== Position Updates ===")
+            # Get current joint positions for debugging
+            current_positions = {}
             for joint_name in all_joints:
                 joint_element = self._g1.mjcf_model.find('joint', joint_name)
                 if joint_element is not None:
-                    old_pos = physics.bind(joint_element).qpos[0]
-                    new_pos = float(self._mink_config.q[physics.model.name2id(prefix + joint_name, "joint")])
-                    delta = new_pos - old_pos
-                    
-                    # Apply position and velocity
-                    physics.bind(joint_element).qpos = new_pos
-                    physics.bind(joint_element).qvel = float(vel[physics.model.name2id(prefix + joint_name, 'joint')])
-                    
-                    if abs(delta) > 0.001:  # Only print significant changes
-                        print(f"Joint {joint_name}:")
-                        print(f"  Delta: {delta:.4f}")
-                        print(f"  Velocity: {vel[physics.model.name2id(prefix + joint_name, 'joint')]:.4f}")
+                    current_positions[joint_name] = physics.bind(joint_element).qpos[0]
 
-            # Store velocities for use between IK updates
-            self._last_velocities = {}
+            # Update joint positions using position actuators
+            print("\n=== Updating Joint Positions ===")
             for joint_name in all_joints:
-                joint_element = self._g1.mjcf_model.find('joint', joint_name)
-                if joint_element is not None:
-                    self._last_velocities[joint_name] = physics.bind(joint_element).qvel[0]
+                joint_id = physics.model.name2id(prefix + joint_name, "joint")
+                if joint_id >= 0:
+                    # Get the actuator for this joint
+                    actuator = self._g1.mjcf_model.find('actuator', joint_name)
+                    if actuator is not None:
+                        # Get target position from IK solution
+                        target_pos = float(self._mink_config.q[joint_id])
+                        # Set actuator control (which is position for these actuators)
+                        physics.bind(actuator).ctrl = target_pos
+                        print(f"{joint_name}:")
+                        print(f"  Current pos: {current_positions[joint_name]:.4f}")
+                        print(f"  Target pos: {target_pos:.4f}")
 
             print("\n=== Final Error ===")
             for side in ['right', 'left']:
                 wrist_body = physics.bind(self._g1.mjcf_model.find('body', f'{side}_wrist_yaw_link'))
                 final_pos = wrist_body.xpos
-                error = np.linalg.norm(hand_mapping[side] - final_pos)  # Compare against adjusted target
+                error = np.linalg.norm(hand_mapping[side] - final_pos)
                 print(f"{side.capitalize()} arm final error: {error:.4f}m")
 
         except Exception as e:
@@ -509,19 +495,10 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
         # Get shadow hand positions and update G1 arms
         hand_positions = self._get_shadow_hand_positions(physics)
         
-        # Only run IK every _ik_update_rate steps
-        if self._ik_counter % self._ik_update_rate == 0:
-            self._update_g1_arms(physics, hand_positions)
-            self._ik_counter = 0
-        else:
-            # If not running IK, use the last computed velocities if available
-            if self._last_velocities is not None:
-                prefix = "g1_29dof_rev_1_0/"
-                all_joints = self._left_arm_joints + self._right_arm_joints
-                for joint_name in all_joints:
-                    joint_element = self._g1.mjcf_model.find('joint', joint_name)
-                    if joint_element is not None:
-                        physics.bind(joint_element).qvel = self._last_velocities[joint_name]
+        # Run IK every timestep (since _ik_update_rate = 1)
+        # if self._ik_counter % self._ik_update_rate == 0:
+        self._update_g1_arms(physics, hand_positions)
+            # self._ik_counter = 0
         
         self._ik_counter += 1
 
