@@ -75,7 +75,7 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
         
         # Add movement timing variables
         self._movement_time = 0.0
-        self._movement_freq = 10  # Hz
+        self._movement_freq = 11  # Hz
         self._waist_amplitude = 0.1  # radians
         self._leg_amplitude = 0.3  # radians for knee and hip pitch
         self._hip_roll_amplitude = 0.0  # radians for hip roll (side-to-side)
