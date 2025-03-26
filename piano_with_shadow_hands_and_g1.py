@@ -72,6 +72,12 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
         self._ik_update_rate = 1
         self._ik_counter = 0
         self._last_velocities = None
+        
+        # Add movement timing variables
+        self._movement_time = 0
+        self._movement_freq = 0.25  # Hz (increased from 0.5)
+        self._waist_amplitude = 0.1  # radians (increased from 0.1)
+        self._leg_amplitude = 0.0  # radians (increased from 0.05)
 
     def _euler_to_quat(self, roll, pitch, yaw):
         """Convert euler angles to quaternion."""
@@ -180,8 +186,8 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
                 # Set waist pitch joint to angle head downward
                 waist_pitch_joint = self._g1.mjcf_model.find('joint', 'waist_pitch_joint')
                 if waist_pitch_joint is not None:
-                    # Set to -0.2 radians (about 11.5 degrees) downward
-                    physics.bind(waist_pitch_joint).qpos = -0.2
+                    # Set to -0.4 radians (about 23 degrees) downward - increased from -0.2
+                    physics.bind(waist_pitch_joint).qpos = -0.4
                 else:
                     raise ValueError("Warning: Could not find waist pitch joint")
                 
@@ -492,13 +498,50 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
         """Updates the environment using the control signal."""
         super().before_step(physics, action, random_state)
         
+        # Update movement time
+        self._movement_time += physics.timestep()
+        
+        # Calculate sinusoidal values for smooth movement
+        waist_angle = self._waist_amplitude * np.sin(2 * np.pi * self._movement_freq * self._movement_time)
+        leg_angle = self._leg_amplitude * np.sin(2 * np.pi * self._movement_freq * self._movement_time)
+        
+        # Apply torso movement with constant forward pitch
+        waist_joints = {
+            'waist_pitch_joint': 0.15,  # Constant forward pitch of 0.6 radians (about 34 degrees)
+            'waist_roll_joint': 0,
+            'waist_yaw_joint': 0
+        }
+        
+        # Apply waist movement
+        for joint_name, base_angle in waist_joints.items():
+            actuator = self._g1.mjcf_model.find('actuator', joint_name)
+            if actuator is not None:
+                if joint_name == 'waist_pitch_joint':
+                    physics.bind(actuator).ctrl = base_angle + waist_angle  # Add oscillation to base pitch
+                else:
+                    physics.bind(actuator).ctrl = base_angle  # No oscillation for roll and yaw
+        
+        # Apply subtle leg movement
+        leg_joints = [
+            'left_hip_pitch_joint',
+            'right_hip_pitch_joint',
+            'left_knee_joint',
+            'right_knee_joint'
+        ]
+        
+        # Apply leg movement
+        for joint_name in leg_joints:
+            actuator = self._g1.mjcf_model.find('actuator', joint_name)
+            if actuator is not None:
+                physics.bind(actuator).ctrl = leg_angle
+        
         # Get shadow hand positions and update G1 arms
         hand_positions = self._get_shadow_hand_positions(physics)
         
         # Run IK every timestep (since _ik_update_rate = 1)
-        # if self._ik_counter % self._ik_update_rate == 0:
-        self._update_g1_arms(physics, hand_positions)
-            # self._ik_counter = 0
+        if self._ik_counter % self._ik_update_rate == 0:
+            self._update_g1_arms(physics, hand_positions)
+            self._ik_counter = 0
         
         self._ik_counter += 1
 
