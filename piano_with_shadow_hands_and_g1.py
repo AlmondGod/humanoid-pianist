@@ -59,9 +59,9 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
         
         super().__init__(*args, **kwargs)
         self._camera_angle = 2.2
-        self._camera_radius = 0.4
+        self._camera_radius = 2.4
         self._camera_height = 1.0
-        self._camera_angular_velocity = 0.003
+        self._camera_angular_velocity = 0.01
         self._setup_g1_arm_joints()
         self.add_g1()
         self._disable_collisions_between_hands_and_g1()
@@ -74,10 +74,11 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
         self._last_velocities = None
         
         # Add movement timing variables
-        self._movement_time = 0
-        self._movement_freq = 0.25  # Hz (increased from 0.5)
-        self._waist_amplitude = 0.1  # radians (increased from 0.1)
-        self._leg_amplitude = 0.0  # radians (increased from 0.05)
+        self._movement_time = 0.0
+        self._movement_freq = 10  # Hz
+        self._waist_amplitude = 0.1  # radians
+        self._leg_amplitude = 0.3  # radians for knee and hip pitch
+        self._hip_roll_amplitude = 0.0  # radians for hip roll (side-to-side)
 
     def _euler_to_quat(self, roll, pitch, yaw):
         """Convert euler angles to quaternion."""
@@ -168,8 +169,6 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
             return
 
         try:
-            print("\n=== Initializing G1 Position ===")
-            
             # Find the G1's root body
             root_name = "g1_29dof_rev_1_0/"
             root_id = physics.model.name2id(root_name, "body")
@@ -196,13 +195,8 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
                 
                 # Update arm positions to match hands
                 self._update_g1_arms(physics, hand_positions)
-                
-                print(f"G1 base position set to: {base_pos}")
-                print(f"Initial hand positions: {hand_positions}")
             else:
                 print(f"Warning: Could not find G1 root body with name {root_name}")
-                
-            print("=== End Initializing G1 Position ===\n")
             
         except Exception as e:
             print(f"Error initializing G1 position: {e}")
@@ -214,27 +208,21 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
         # First call parent's initialize_episode
         super().initialize_episode(physics, random_state)
         
-        print("\n=== Raising Hands Debug ===")
         # Raise the hands using physics
         for hand_name, hand in [("right", self.right_hand), ("left", self.left_hand)]:
             hand_body = physics.bind(hand.root_body)
             current_pos = hand_body.xpos.copy()
             new_pos = [current_pos[0], current_pos[1], current_pos[2] + self._height_offset]
             hand_body.xpos = new_pos
-            print(f"{hand_name.capitalize()} hand position: {current_pos} -> {new_pos}")
         
         # Apply changes
         physics.forward()
-        print("=== End Raising Hands Debug ===\n")
         
         # Initialize G1 position after hands are positioned
         self._initialize_g1_position(physics)
 
-        print("initializing mink")
         # Initialize mink configuration if not already done
         self._initialize_mink(physics)
-
-        print("mink initialized")
         
         # Reset and update camera
         self._camera_angle = 2.2
@@ -253,7 +241,6 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
             self._reward_fn.add("fingering_reward", self._compute_fingering_reward)
         else:
             # use OT based fingering
-            print('Fingering is unavailable. OT fingering reward is used.')
             self._reward_fn.add("ot_fingering_reward", self._compute_ot_fingering_reward)
 
         if not self._disable_forearm_reward:
@@ -284,17 +271,14 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
         """Get the current positions of both shadow hands."""
         positions = {}
         
-        print("\n=== Shadow Hand Position Calculation ===")
         # Get palm/forearm positions for both hands using root_body
         for side, hand in [('left', self.left_hand), ('right', self.right_hand)]:
             root_pos = physics.bind(hand.root_body).xpos.copy()
-            print(f"{side} hand root position: {root_pos}")
             
             # Add offset to move target position from forearm to approximate wrist position
             # The shadow hand's forearm is about 0.1m long, so move the target forward
             forearm_to_wrist_offset = np.array([0.1, 0, 0])  # Added 10cm forward offset
             positions[side] = root_pos + forearm_to_wrist_offset
-            print(f"{side} hand target position (with offset): {positions[side]}")
         
         return positions
 
@@ -393,11 +377,6 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
                 current_pos = wrist_body.xpos
                 target_pos = hand_mapping[side]  # Use adjusted targets
                 error = np.linalg.norm(target_pos - current_pos)
-                print(f"\n{side.capitalize()} arm:")
-                print(f"  Original target: {hand_positions[side]}")
-                print(f"  Adjusted target: {target_pos}")
-                print(f"  Current: {current_pos}")
-                print(f"  Error: {error:.4f}m")
 
             # Get current joint positions
             prefix = "g1_29dof_rev_1_0/"
@@ -420,7 +399,6 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
                 wxyz_xyz[4:] = hand_mapping[side]  # Use adjusted xyz position
                 target = mink.SE3(wxyz_xyz=wxyz_xyz)
                 task.set_target(target)
-                print(f"\nSetting {side} task target to: {hand_mapping[side]}")
             
             # Increase rate limiter frequency from 20Hz to 100Hz
             rate = RateLimiter(frequency=1000.0, warn=False)
@@ -462,7 +440,6 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
                     current_positions[joint_name] = physics.bind(joint_element).qpos[0]
 
             # Update joint positions using position actuators
-            print("\n=== Updating Joint Positions ===")
             for joint_name in all_joints:
                 joint_id = physics.model.name2id(prefix + joint_name, "joint")
                 if joint_id >= 0:
@@ -473,16 +450,6 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
                         target_pos = float(self._mink_config.q[joint_id])
                         # Set actuator control (which is position for these actuators)
                         physics.bind(actuator).ctrl = target_pos
-                        print(f"{joint_name}:")
-                        print(f"  Current pos: {current_positions[joint_name]:.4f}")
-                        print(f"  Target pos: {target_pos:.4f}")
-
-            print("\n=== Final Error ===")
-            for side in ['right', 'left']:
-                wrist_body = physics.bind(self._g1.mjcf_model.find('body', f'{side}_wrist_yaw_link'))
-                final_pos = wrist_body.xpos
-                error = np.linalg.norm(hand_mapping[side] - final_pos)
-                print(f"{side.capitalize()} arm final error: {error:.4f}m")
 
         except Exception as e:
             print(f"Error in _update_g1_arms: {str(e)}")
@@ -503,11 +470,15 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
         
         # Calculate sinusoidal values for smooth movement
         waist_angle = self._waist_amplitude * np.sin(2 * np.pi * self._movement_freq * self._movement_time)
-        leg_angle = self._leg_amplitude * np.sin(2 * np.pi * self._movement_freq * self._movement_time)
+        
+        # Right leg movement - hip and knee in opposite phases
+        right_hip_angle = -np.abs(self._leg_amplitude * np.sin(2 * np.pi * self._movement_freq * self._movement_time))
+        right_knee_angle = np.abs(self._leg_amplitude * 2 * np.sin(2 * np.pi * self._movement_freq * self._movement_time))  # Opposite phase
+        right_ankle_angle = -np.abs(self._leg_amplitude * 2 * np.sin(2 * np.pi * self._movement_freq * self._movement_time))  # Same phase as hip
         
         # Apply torso movement with constant forward pitch
         waist_joints = {
-            'waist_pitch_joint': 0.15,  # Constant forward pitch of 0.6 radians (about 34 degrees)
+            'waist_pitch_joint': 0.15,  # Constant forward pitch
             'waist_roll_joint': 0,
             'waist_yaw_joint': 0
         }
@@ -517,23 +488,31 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
             actuator = self._g1.mjcf_model.find('actuator', joint_name)
             if actuator is not None:
                 if joint_name == 'waist_pitch_joint':
-                    physics.bind(actuator).ctrl = base_angle + waist_angle  # Add oscillation to base pitch
+                    physics.bind(actuator).ctrl = base_angle + waist_angle
                 else:
-                    physics.bind(actuator).ctrl = base_angle  # No oscillation for roll and yaw
+                    physics.bind(actuator).ctrl = base_angle
+            else:
+                raise ValueError(f"Actuator not found for joint: {joint_name}")
         
-        # Apply subtle leg movement
-        leg_joints = [
-            'left_hip_pitch_joint',
-            'right_hip_pitch_joint',
-            'left_knee_joint',
-            'right_knee_joint'
-        ]
+        # Define leg joints with their corresponding angles
+        leg_joints = {
+            'right_hip_pitch_joint': right_hip_angle,
+            'right_knee_joint': right_knee_angle,
+            'right_ankle_pitch_joint': right_ankle_angle,  # Added ankle pitch
+            'right_hip_roll_joint': 0,  # Keep roll stable
+            'right_hip_yaw_joint': 0,   # Keep yaw stable
+            'right_ankle_roll_joint': 0  # Keep ankle roll stable
+        }
         
         # Apply leg movement
-        for joint_name in leg_joints:
+        for joint_name, angle in leg_joints.items():
             actuator = self._g1.mjcf_model.find('actuator', joint_name)
             if actuator is not None:
-                physics.bind(actuator).ctrl = leg_angle
+                print(f"setting leg joint {joint_name} to {angle}")
+                physics.bind(actuator).ctrl = angle
+            else:
+                raise ValueError(f"Actuator not found for joint: {joint_name}")
+            
         
         # Get shadow hand positions and update G1 arms
         hand_positions = self._get_shadow_hand_positions(physics)
@@ -928,12 +907,9 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
         # Raise the piano base
         piano_base = self.piano.mjcf_model.find('body', 'base')
         if piano_base is not None:
-            print("Piano base body found")
             current_pos = piano_base.pos
             if current_pos is not None:
-                print(f"Current piano position: {current_pos}")
                 piano_base.pos = (current_pos[0], current_pos[1], current_pos[2] + self._height_offset)
-                print(f"New piano position: {piano_base.pos}")
         
         # Raise all piano keys
         for i in range(88):  # Piano has 88 keys
