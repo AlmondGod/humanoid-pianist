@@ -62,6 +62,10 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
         self._camera_radius = 2.4
         self._camera_height = 1.0
         self._camera_angular_velocity = 0.01
+        self._camera_zoom_rate = 0.0  # Rate at which camera zooms out
+        self._max_camera_radius = 2.4  # Maximum zoom out distance
+        self._camera_tilt = 0.4  # Downward tilt angle in radians
+        self._target_camera_height = self._camera_height # Final height
         self._setup_g1_arm_joints()
         self.add_g1()
         self._disable_collisions_between_hands_and_g1()
@@ -106,29 +110,6 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
             mode='fixed'  # Use fixed mode to allow manual control
         )
 
-    def _find_g1_model(self) -> Optional[str]:
-        """Find the G1 model XML file.
-        
-        Returns:
-            Path to the G1 model file if found, None otherwise.
-        """
-        # First try the modified version, then the original
-        potential_paths = [
-            os.path.join(os.path.dirname(__file__), "mujoco_menagerie/unitree_g1/g1_modified.xml"),
-            os.path.expanduser("~/mujoco_menagerie/unitree_g1/g1_modified.xml"),
-            "/usr/local/share/mujoco_menagerie/unitree_g1/g1_modified.xml",
-            os.path.join(os.path.dirname(__file__), "mujoco_menagerie/unitree_g1/g1.xml"),
-            os.path.expanduser("~/mujoco_menagerie/unitree_g1/g1.xml"),
-            "/usr/local/share/mujoco_menagerie/unitree_g1/g1.xml",
-        ]
-        
-        for path in potential_paths:
-            if os.path.exists(path):
-                print(f"Found G1 model at {path}")
-                return path
-                
-        return None
-
     def add_g1(self):
         """Add Unitree G1 robot to the environment."""
         try:
@@ -145,10 +126,7 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
                 euler=[0, 0, 3.14159]  # Rotate 180 degrees around Z axis (in radians)
             )
 
-            # Find the G1 model path
-            model_path = self._find_g1_model()
-            if model_path is None:
-                raise ValueError("Could not find Unitree G1 model file")
+            model_path = os.path.join(os.path.dirname(__file__), "unitree_g1/g1_modified.xml")
 
             # Create and attach G1 entity
             g1_entity = G1Entity(model_path)
@@ -467,7 +445,7 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
         
         # Update movement time
         self._movement_time += physics.timestep()
-        
+
         # Calculate sinusoidal values for smooth movement
         waist_angle = self._waist_amplitude * np.sin(2 * np.pi * self._movement_freq * self._movement_time)
         
@@ -533,9 +511,14 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
         # First call parent's after_step
         super().after_step(physics, random_state)
 
+        # Update camera radius (zoom out gradually)
+        self._camera_radius -= self._camera_zoom_rate
+        
+        # Update camera height gradually
+        self._camera_height = self._camera_height + (self._target_camera_height - self._camera_height) * 0.001
+
         # Update camera position - only rotate in the horizontal plane
         self._camera_angle += self._camera_angular_velocity
-        # self._camera_angle = 2.2
         new_x = (self._camera_radius * np.cos(self._camera_angle)) - 0.6
         new_y = (self._camera_radius * np.sin(self._camera_angle)) + 0.2
         
@@ -543,8 +526,8 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
         camera = physics.bind(self._camera)
         camera.pos = [new_x, new_y, self._camera_height + 0.3]
         
-        # Calculate look direction vector (pointing horizontally)
-        look_dir = np.array([-new_x, -new_y + 0.15, -0.18])  # Point towards center but keep horizontal
+        # Calculate look direction vector
+        look_dir = np.array([-new_x, -new_y + 0.15, -0.18 - self._camera_tilt]) 
         look_dir = look_dir / np.linalg.norm(look_dir)
         
         # Fixed up vector (world up)

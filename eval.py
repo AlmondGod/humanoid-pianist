@@ -128,8 +128,8 @@ class Args:
     notes: str = ""
     mode: str = "online"
     environment_name: Optional[str] = None
-    midi_file: Optional[Path] = Path("/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut 60s.mid")
-    load_checkpoint: Optional[Path] = Path("/Users/almondgod/Repositories/robopianist/robopianist-rl/models/CruelAngelsThesis60s/SAC-/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut 60s.mid-42-2025-02-24-20-25-20/checkpoint_00120000.pkl")  # Path to checkpoint file for resuming training
+    midi_file: Optional[Path] = Path("/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid")
+    load_checkpoint: Optional[Path] = Path("/Users/almondgod/Repositories/robopianist/robopianist-rl/models/CruelAngelsThesismiddle15s/SAC-/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid-42-2025-03-03-21-29-41/checkpoint_00640000.pkl") 
     n_steps_lookahead: int = 10
     trim_silence: bool = False
     gravity_compensation: bool = True
@@ -151,7 +151,7 @@ class Args:
     action_reward_observation: bool = True
     agent_config: sac.SACConfig = sac.SACConfig()
     algorithm: Literal["sac"] = "sac"  # Add QTOpt option
-    unitree_g1_path: Optional[str] = "/Users/almondgod/Repositories/robopianist/robopianist-rl/mujoco_menagerie/unitree_g1/g1_modified.xml"
+    unitree_g1_path: str = "/Users/almondgod/Repositories/robopianist/robopianist-rl/unitree_g1/g1_modified.xml"
     unitree_position: Tuple[float, float, float] = (0.0, 0.4, 0.7)
 
 

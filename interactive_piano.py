@@ -383,7 +383,7 @@ def get_env(args: Args):
     return env
 
 
-def add_unitree_g1_to_env(env, position, model_path=None):
+def add_unitree_g1_to_env(env, position, model_path="unitree_g1/g1_modified.xml"):
     """Add a Unitree G1 to the environment.
     
     Args:
@@ -399,36 +399,6 @@ def add_unitree_g1_to_env(env, position, model_path=None):
     # Get the arena from the environment
     task = env.task
     arena = task.arena
-    
-    # If a model path wasn't provided, look in standard locations
-    if model_path is None:
-        # Try in MuJoCo Menagerie directory, which might be:
-        # 1. In the root of the repository
-        # 2. In a user's home directory
-        # 3. In a standard system location
-        potential_paths = [
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "mujoco_menagerie", "unitree_g1", "g1_modified.xml"),  # Modified G1 model in the script directory
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "mujoco_menagerie", "unitree_g1", "g1_modified.xml"),  # Repository root with modified model
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "mujoco_menagerie", "unitree_g1", "g1.xml"),  # Original model in script directory
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "mujoco_menagerie", "unitree_g1", "g1.xml"),  # Repository root with original model
-            os.path.expanduser("~/mujoco_menagerie/unitree_g1/g1_modified.xml"),  # Modified model in user's home directory
-            os.path.expanduser("~/mujoco_menagerie/unitree_g1/g1.xml"),  # User's home directory
-            "/usr/local/share/mujoco_menagerie/unitree_g1/g1_modified.xml",  # System location with modified model
-            "/usr/local/share/mujoco_menagerie/unitree_g1/g1.xml",  # System location
-        ]
-        
-        # Try each potential path
-        for path in potential_paths:
-            if os.path.exists(path):
-                model_path = path
-                if "g1_modified.xml" in path:
-                    print(f"Found modified G1 model (without hands) at {path}")
-                else:
-                    print(f"Found G1 model at {path}")
-                break
-                
-        if model_path is None:
-            assert False, "Could not find G1 model at any expected location"
     
     print(f"Loading G1 model from: {model_path}")
     
