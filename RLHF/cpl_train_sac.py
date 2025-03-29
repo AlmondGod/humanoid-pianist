@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 import optax
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Any
 import pickle
 import time
 from pathlib import Path
@@ -33,13 +33,13 @@ class CPLTrainingConfig:
 
 @dataclass
 class Args:
-    sac_checkpoint: str
-    preference_data: str 
+    sac_checkpoint: str = "/Users/almondgod/Repositories/robopianist/robopianist-rl/models/CruelAngelsThesismiddle15s/SAC-/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid-42-2025-03-24-01-38-56/checkpoint_00800000.pkl"
+    preference_data: str = "/Users/almondgod/Repositories/robopianist/robopianist-rl/RLHF/preference_data/2025-03-28-22-15-43/preference_data.pkl"
     output_dir: str = "RLHF/cpl_trained_models"
     config: CPLTrainingConfig = CPLTrainingConfig()
     
     # Environment args (matching generate_preference_data.py)
-    midi_file: str = "/path/to/midi.mid"
+    midi_file: str = "/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid"
     environment_name: Optional[str] = None
     n_steps_lookahead: int = 10
     trim_silence: bool = False
@@ -201,24 +201,67 @@ def cpl_loss(policy_fn, params, preferred, non_preferred, initial_params, config
     
     return total_loss
 
+@struct.dataclass
 class CPL_SAC(SAC):
     """SAC variant that uses CPL loss for training."""
+    initial_params: Optional[Any] = None  # Add initial_params as a field
     
     @classmethod
-    def from_sac_checkpoint(cls, checkpoint_path: str, spec, config: SACConfig, seed: int = 0):
-        """Initialize CPL_SAC from a pretrained SAC checkpoint."""
-        with open(checkpoint_path, 'rb') as f:
-            sac_data = pickle.load(f)
-        
-        # Initialize with same architecture
-        agent = cls.initialize(spec, config, seed)
-        
-        # Load pretrained parameters
-        agent = agent.replace(
-            actor=agent.actor.replace(params=sac_data['params']),
-            initial_actor_params=sac_data['params']  # Store initial params for regularization
+    def initialize(
+        cls,
+        spec: EnvironmentSpec,
+        config: SACConfig,
+        seed: int = 0,
+        discount: float = 0.99,
+    ) -> "CPL_SAC":
+        """Initialize a CPL_SAC instance."""
+        # Call parent's initialize to get base SAC instance
+        sac = super().initialize(spec, config, seed, discount)
+        # Convert to CPL_SAC instance
+        return cls(
+            actor=sac.actor,
+            rng=sac.rng,
+            critic=sac.critic,
+            target_critic=sac.target_critic,
+            temp=sac.temp,
+            tau=sac.tau,
+            discount=sac.discount,
+            target_entropy=sac.target_entropy,
+            num_qs=sac.num_qs,
+            num_min_qs=sac.num_min_qs,
+            backup_entropy=sac.backup_entropy,
+            initial_params=None,  # Initialize with None
         )
-        return agent
+    
+    def from_sac_checkpoint(self, checkpoint_path: str, spec: EnvironmentSpec, config: SACConfig, seed: int = 0):
+        """Initialize CPL_SAC from a pretrained SAC checkpoint."""
+        # Initialize with same architecture
+        agent = self.initialize(spec, config, seed)
+        
+        # Load checkpoint
+        print(f"\nLoading checkpoint from {checkpoint_path}")
+        try:
+            with open(checkpoint_path, 'rb') as f:
+                checkpoint = pickle.load(f)
+            
+            # Store initial params for conservative loss
+            initial_params = checkpoint['params'].copy()
+            
+            # Load all parameters from checkpoint and set initial_params
+            agent = agent.replace(
+                actor=agent.actor.replace(params=checkpoint['params']),
+                critic=agent.critic.replace(params=checkpoint['critic_params']),
+                target_critic=agent.target_critic.replace(params=checkpoint['target_critic_params']),
+                temp=agent.temp.replace(params=checkpoint['temp_params']),
+                initial_params=initial_params,  # Set initial_params using replace
+            )
+            
+            print("Successfully loaded checkpoint")
+            return agent
+            
+        except Exception as e:
+            print(f"Error loading checkpoint: {e}")
+            raise
     
     def update_cpl(self, preferred, non_preferred, config):
         """Update using CPL loss."""
@@ -232,41 +275,37 @@ class CPL_SAC(SAC):
                 lambda s, a: self.actor.apply_fn({"params": actor_params}, s).log_prob(a)
             )(non_preferred["states"], non_preferred["actions"])
             
-            # Apply discounting
+            # Apply discounting and compute sums
             timesteps = jnp.arange(preferred_logprobs.shape[0])
             discount = config.gamma ** timesteps
-            
-            # First sum the discounted log probs for each segment
             preferred_sum = jnp.sum(discount * preferred_logprobs)
             non_preferred_sum = jnp.sum(discount * non_preferred_logprobs)
             
-            # Then apply temperature and preference weighting
+            # Compute scores and loss
             preferred_score = config.alpha * preferred_sum
             non_preferred_score = config.alpha * config.lambda_ * non_preferred_sum
             
-            # Compute preference loss
             preference_loss = -jnp.log(
                 jnp.exp(preferred_score) / 
                 (jnp.exp(preferred_score) + jnp.exp(non_preferred_score))
             )
             
-            # Compute conservative regularization per segment
+            # Compute conservative loss
             def compute_conservative_loss(states, actions):
                 current_logprobs = jax.vmap(
                     lambda s, a: self.actor.apply_fn({"params": actor_params}, s).log_prob(a)
                 )(states, actions)
                 
                 initial_logprobs = jax.vmap(
-                    lambda s, a: self.initial_actor_params[s].log_prob(a)
+                    lambda s, a: self.actor.apply_fn({"params": self.initial_params}, s).log_prob(a)
                 )(states, actions)
                 
-                # Apply temperature scaling to log probs
+                # Apply temperature scaling
                 current_logprobs = config.alpha * current_logprobs
                 initial_logprobs = config.alpha * initial_logprobs
                 
                 return jnp.mean((current_logprobs - initial_logprobs) ** 2)
             
-            # Compute conservative loss for both segments
             preferred_conservative = compute_conservative_loss(
                 preferred["states"], preferred["actions"]
             )
@@ -274,18 +313,26 @@ class CPL_SAC(SAC):
                 non_preferred["states"], non_preferred["actions"]
             )
             
-            # Average conservative loss across segments
             conservative_loss = (preferred_conservative + non_preferred_conservative) / 2.0
-            
-            # Combine losses
             total_loss = preference_loss + config.conservative_weight * conservative_loss
             
             return total_loss, {"loss": total_loss}
         
-        grads, info = jax.grad(cpl_loss_fn, has_aux=True)(self.actor.params)
-        actor = self.actor.apply_gradients(grads=grads)
-        
-        return self.replace(actor=actor), info
+        try:
+            # Get gradients with respect to the params
+            grads, info = jax.grad(cpl_loss_fn, has_aux=True)(self.actor.params)
+            
+            # Update actor parameters
+            new_actor = self.actor.apply_gradients(grads=grads)
+            actor = self.actor.replace(params=new_actor.params)
+            
+            return self.replace(actor=actor), info
+            
+        except Exception as e:
+            print("\nError during gradient computation or update:")
+            print(f"Error type: {type(e)}")
+            print(f"Error message: {str(e)}")
+            raise
 
 def train_cpl(args: Args):
     """Train policy using CPL on preference data."""
@@ -310,11 +357,12 @@ def train_cpl(args: Args):
         critic_dropout_rate=0.01,
         critic_layer_norm=True,
     )
-    agent = CPL_SAC.from_sac_checkpoint(
-        args.sac_checkpoint, 
-        spec, 
-        sac_config, 
-        args.config.seed
+    cpl_sac = CPL_SAC.initialize(spec, sac_config)
+    agent = cpl_sac.from_sac_checkpoint(
+        checkpoint_path=args.sac_checkpoint, 
+        spec=spec, 
+        config=sac_config, 
+        seed=args.config.seed
     )
 
     # Load preference data
