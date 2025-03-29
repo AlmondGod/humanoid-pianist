@@ -36,8 +36,8 @@ From the same conda environment:
 We provide an example bash script to train an SAC policy to play Twinkle Twinkle Little Star with the task parameters used in the robopianist paper:
 
 ```bash
-WANDB_DIR=/tmp/robopianist/ MUJOCO_GL=glfw XLA_PYTHON_CLIENT_PREALLOCATE=false python train.py \
-    --root-dir models/ \ #add song name as a subdirectory
+WANDB_DIR=/tmp/robopianist/ MUJOCO_GL=glfw XLA_PYTHON_CLIENT_PREALLOCATE=false python scripts/train.py \
+    --root-dir models/CrossingField10s \
     --warmstart-steps 5000 \
     --max-steps 5000000 \
     --discount 0.8 \
@@ -49,7 +49,7 @@ WANDB_DIR=/tmp/robopianist/ MUJOCO_GL=glfw XLA_PYTHON_CLIENT_PREALLOCATE=false p
     --reduced-action-space \
     --control-timestep 0.05 \
     --n-steps-lookahead 10 \
-    --midi-file "TwinkleTwinkleLittleStar" \ # replace with the path to your midi file
+    --midi-file "example_midis/Crossing Field 10s.mid" \
     --action-reward-observation \
     --primitive-fingertip-collisions \
     --eval-episodes 1 \
@@ -61,12 +61,12 @@ WANDB_DIR=/tmp/robopianist/ MUJOCO_GL=glfw XLA_PYTHON_CLIENT_PREALLOCATE=false p
 To evaluate a trained policy, run `python eval.py`
 
 ```bash
-python eval.py \
+python scripts/eval.py \
 --load_checkpoint <YOUR_MODEL_PATH> \
 --midi-file <YOUR_MIDI_FILE_PATH>
 ```
 
-### Troubleshooting and Tuning Training
+## Troubleshooting and Tuning Training
 
 The current JAX is configured to run on Apple Silicon. Please adjust the JAX METAL lines according to your system.
 

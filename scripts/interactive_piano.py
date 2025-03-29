@@ -14,7 +14,7 @@ import numpy as np
 import time
 from robopianist.viewer import launch
 from robopianist import wrappers
-from eval import load
+from scripts.eval import load
 
 @dataclass(frozen=True)
 class Args:
