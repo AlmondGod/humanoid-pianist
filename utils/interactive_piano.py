@@ -7,16 +7,14 @@ shadow hands and an integrated Unitree G1 robot.
 """
 
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional
 import tyro
 from dataclasses import dataclass
 import numpy as np
 import time
-from dm_control import mjcf
-from robopianist import suite
 from robopianist.viewer import launch
-import robopianist.wrappers as robopianist_wrappers
-from wrappers.piano_with_shadow_hands_and_g1 import PianoWithShadowHandsAndG1
+from robopianist import wrappers
+from eval import load
 
 @dataclass(frozen=True)
 class Args:
@@ -27,26 +25,28 @@ class Args:
     environment_name: str = "RoboPianist-debug-TwinkleTwinkleLittleStar-v0"
     n_steps_lookahead: int = 10
     trim_silence: bool = False
+    gravity_compensation: bool = True
+    reduced_action_space: bool = True
     control_timestep: float = 0.05
     stretch_factor: float = 1.0
     shift_factor: int = 0
     wrong_press_termination: bool = False
-    disable_fingering_reward: bool = False
+    disable_fingering_reward: bool = True
     disable_forearm_reward: bool = False
     disable_colorization: bool = False
     disable_hand_collisions: bool = False
+    primitive_fingertip_collisions: bool = True
     
     # Viewer configuration
     width: int = 1024 
     height: int = 768
     camera_id: Optional[str | int] = "piano/back"
 
-
 def get_env(args: Args):
     """Create the environment based on provided arguments."""
     # Load the environment with PianoWithShadowHandsAndG1 wrapper
-    env = suite.load(
-        environment_name=args.environment_name,
+    env = load(
+        environment_name=None,
         midi_file=args.midi_file,
         seed=args.seed,
         stretch=args.stretch_factor,
@@ -54,22 +54,31 @@ def get_env(args: Args):
         task_kwargs=dict(
             n_steps_lookahead=args.n_steps_lookahead,
             trim_silence=args.trim_silence,
+            gravity_compensation=args.gravity_compensation,
+            reduced_action_space=args.reduced_action_space,
             control_timestep=args.control_timestep,
             wrong_press_termination=args.wrong_press_termination,
             disable_fingering_reward=args.disable_fingering_reward,
             disable_forearm_reward=args.disable_forearm_reward,
             disable_colorization=args.disable_colorization,
             disable_hand_collisions=args.disable_hand_collisions,
+            primitive_fingertip_collisions=args.primitive_fingertip_collisions,
             change_color_on_activation=True,
         ),
-        environment_class=PianoWithShadowHandsAndG1  # Use our G1-enabled environment
     )
     
-    # Add evaluation wrapper
-    env = robopianist_wrappers.MidiEvaluationWrapper(
-        environment=env, deque_size=1
-    )
-    
+    env = wrappers.EpisodeStatisticsWrapper(environment=env, deque_size=1)
+    if args.action_reward_observation:
+        env = wrappers.ObservationActionRewardWrapper(env)
+    env = wrappers.ConcatObservationWrapper(env)
+    if args.frame_stack > 1:
+        env = wrappers.FrameStackingWrapper(
+            env, num_frames=args.frame_stack, flatten=True
+        )
+    env = wrappers.CanonicalSpecWrapper(env, clip=args.clip)
+    env = wrappers.SinglePrecisionWrapper(env)
+    env = wrappers.DmControlWrapper(env)
+
     return env
 
 
@@ -148,25 +157,6 @@ def main(args: Args) -> None:
     # Create the environment
     global env  # For policy access
     env = get_env(args)
-    
-    # Print environment information
-    print("\n========= Interactive RoboPianist Environment =========")
-    print(f"MIDI File: {args.midi_file or args.environment_name}")
-    print(f"Control timestep: {args.control_timestep}")
-    print(f"Fingering reward: {'Disabled' if args.disable_fingering_reward else 'Enabled'}")
-    print(f"Forearm reward: {'Disabled' if args.disable_forearm_reward else 'Enabled'}")
-    print(f"Colorization: {'Disabled' if args.disable_colorization else 'Enabled'}")
-    print(f"Hand collisions: {'Disabled' if args.disable_hand_collisions else 'Enabled'}")
-    print("======================================================")
-    
-    # Print control instructions
-    print("\nControl Information:")
-    print("-----------------")
-    print("This demo uses an automatic finger movement pattern.")
-    print("In a full implementation, you would add keyboard controls")
-    print("to manipulate individual finger joints and hand positions.")
-    print("\nPress ESC to quit the viewer.")
-    print("-----------------")
     
     # Select policy (automatic keyboard emulation for demonstration)
     selected_policy = keyboard_policy
