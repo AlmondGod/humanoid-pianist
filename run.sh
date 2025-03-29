@@ -194,7 +194,7 @@ WANDB_DIR=/tmp/robopianist/ MUJOCO_GL=glfw XLA_PYTHON_CLIENT_PREALLOCATE=false p
     --camera-id "piano/back" \
     --tqdm-bar \
     --eval-interval 40000 \
-    --load-checkpoint "/Users/almondgod/Repositories/robopianist/robopianist-rl/models/CruelAngelsThesismiddle15s/SAC-/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid-42-2025-03-03-09-53-14/checkpoint_00920000.pkl"
+    --load-checkpoint "/Users/almondgod/Repositories/robopianist/robopianist-rl/models/CruelAngelsThesismiddle15s/SAC-/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid-42-2025-03-03-21-29-41/checkpoint_00920000.pkl"
 
 
 # Hybrid GRPO Cruel Angel's Thesis middle 15 - OPTIMIZED VERSION
@@ -298,7 +298,7 @@ WANDB_DIR=/tmp/robopianist/ MUJOCO_GL=glfw XLA_PYTHON_CLIENT_PREALLOCATE=false p
     --camera-id "piano/back" \
     --tqdm-bar \
     --eval-interval 40000 \
-    # --load-checkpoint "/Users/almondgod/Repositories/robopianist/robopianist-rl/models/CrossingFieldsComplex15s/SAC-/Users/almondgod/Repositories/robopianist/midi_files_cut/Crossing Fields Complex Cut 15s.mid-42-2025-03-06-00-48-52/checkpoint_00920000.pkl"
+    --load-checkpoint "/Users/almondgod/Repositories/robopianist/robopianist-rl/models/CrossingFieldsComplex15s/SAC-/Users/almondgod/Repositories/robopianist/midi_files_cut/Crossing Fields Complex Cut 15s.mid-42-2025-03-07-01-32-29/checkpoint_00920000.pkl"
 
 
 # GUren no Yumiya 14s SAC Droq
@@ -321,7 +321,8 @@ WANDB_DIR=/tmp/robopianist/ MUJOCO_GL=glfw XLA_PYTHON_CLIENT_PREALLOCATE=false p
     --eval-episodes 1 \
     --camera-id "piano/back" \
     --tqdm-bar \
-    --eval-interval 30000 
+    --eval-interval 30000 \
+    --load-checkpoint "/Users/almondgod/Repositories/robopianist/robopianist-rl/models/GurenNoYumiya14s/SAC-/Users/almondgod/Repositories/robopianist/midi_files_cut/Guren no Yumiya Cut 14s.mid-42-2025-03-22-16-48-30/checkpoint_00600000.pkl"
 
 # QTOpt Cross Field Simple 10s
 WANDB_DIR=/tmp/robopianist/ MUJOCO_GL=glfw XLA_PYTHON_CLIENT_PREALLOCATE=false python train.py \
@@ -344,3 +345,74 @@ WANDB_DIR=/tmp/robopianist/ MUJOCO_GL=glfw XLA_PYTHON_CLIENT_PREALLOCATE=false p
   --tqdm-bar \
   --eval-interval 5000 \
   --load-checkpoint "/Users/almondgod/Repositories/robopianist/robopianist-rl/models/QTOpt-base-CrossingFieldSimple10s/QTOPT-/Users/almondgod/Repositories/robopianist/midi_files_cut/Crossing Field Cut 10s.mid-42-2025-03-05-01-17-41/checkpoint_00090000.pkl"
+
+
+  # unravel
+  WANDB_DIR=/tmp/robopianist/ MUJOCO_GL=glfw XLA_PYTHON_CLIENT_PREALLOCATE=false python train.py \
+    --root-dir /Users/almondgod/Repositories/robopianist/robopianist-rl/models/Unravel10s \
+    --warmstart-steps 5000 \
+    --max-steps 5000000 \
+    --discount 0.8 \
+    --agent-config.critic-dropout-rate 0.01 \
+    --agent-config.critic-layer-norm \
+    --agent-config.hidden-dims 256 256 256 \
+    --trim-silence \
+    --gravity-compensation \
+    --reduced-action-space \
+    --control-timestep 0.05 \
+    --n-steps-lookahead 10 \
+    --midi-file "/Users/almondgod/Repositories/robopianist/midi_files_cut/Unravel Cut 10s.mid" \
+    --action-reward-observation \
+    --primitive-fingertip-collisions \
+    --eval-episodes 1 \
+    --camera-id "piano/back" \
+    --tqdm-bar \
+    --eval-interval 30000 \
+    --load-checkpoint "/Users/almondgod/Repositories/robopianist/robopianist-rl/models/Unravel10s/SAC-/Users/almondgod/Repositories/robopianist/midi_files_cut/Unravel Cut 10s.mid-42-2025-03-22-20-42-46/checkpoint_00600000.pkl"
+
+
+# Crossing Fields Complex Middle 20s
+WANDB_DIR=/tmp/robopianist/ MUJOCO_GL=glfw XLA_PYTHON_CLIENT_PREALLOCATE=false python train.py \
+    --root-dir /Users/almondgod/Repositories/robopianist/robopianist-rl/models/CrossingFieldsComplexMiddle20s \
+    --warmstart-steps 5000 \
+    --max-steps 5000000 \
+    --discount 0.8 \
+    --agent-config.critic-dropout-rate 0.01 \
+    --agent-config.critic-layer-norm \
+    --agent-config.hidden-dims 256 256 256 \
+    --trim-silence \
+    --gravity-compensation \
+    --reduced-action-space \
+    --control-timestep 0.05 \
+    --n-steps-lookahead 10 \
+    --midi-file "/Users/almondgod/Repositories/robopianist/midi_files_cut/Crossing Fields Complex Cut Middle 20s.mid" \
+    --action-reward-observation \
+    --primitive-fingertip-collisions \
+    --eval-episodes 1 \
+    --camera-id "piano/back" \
+    --tqdm-bar \
+    --eval-interval 30000
+
+
+
+# Crossing Fields Complex Cut Middle 32s
+WANDB_DIR=/tmp/robopianist/ MUJOCO_GL=glfw XLA_PYTHON_CLIENT_PREALLOCATE=false python train.py \
+    --root-dir /Users/almondgod/Repositories/robopianist/robopianist-rl/models/CrossingFieldsComplexMiddle32s \
+    --warmstart-steps 5000 \
+    --max-steps 5000000 \
+    --discount 0.8 \
+    --agent-config.critic-dropout-rate 0.01 \
+    --agent-config.critic-layer-norm \
+    --agent-config.hidden-dims 256 256 256 \
+    --trim-silence \
+    --gravity-compensation \
+    --reduced-action-space \
+    --control-timestep 0.05 \
+    --n-steps-lookahead 10 \
+    --midi-file "/Users/almondgod/Repositories/robopianist/midi_files_cut/Crossing Fields Complex Cut Middle 32s.mid" \
+    --action-reward-observation \
+    --primitive-fingertip-collisions \
+    --eval-episodes 1 \
+    --camera-id "piano/back" \
+    --tqdm-bar \
+    --eval-interval 30000

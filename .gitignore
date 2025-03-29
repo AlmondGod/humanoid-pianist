@@ -6,3 +6,4 @@ RLHF/preference_data/*
 RLHF/finetune_sac_models/*
 RLHF/reward_models/*
 eval/*
+RLHF/cpl_trained_models/*
