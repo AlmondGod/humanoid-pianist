@@ -1,3 +1,16 @@
+# Humanoid Robot Pianist
+
+[![PyPI Python Version][pypi-versions-badge]][pypi]
+[![PyPI version][pypi-badge]][pypi]
+
+[tests-badge]: https://github.com/google-research/robopianist/actions/workflows/ci.yml/badge.svg
+[docs-badge]: https://github.com/google-research/robopianist/actions/workflows/docs.yml/badge.svg
+[tests]: https://github.com/google-research/robopianist/actions/workflows/ci.yml
+[docs]: https://google-research.github.io/robopianist/
+[pypi-versions-badge]: https://img.shields.io/pypi/pyversions/robopianist
+[pypi-badge]: https://badge.fury.io/py/robopianist.svg
+[pypi]: https://pypi.org/project/robopianist/
+
 ![Humanoid Robot Pianist](assets/Humanoid%20Robot%20Pianist.png)
 
 ## Installation
