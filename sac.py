@@ -59,7 +59,7 @@ class SACConfig:
     activation: str = "gelu"
     num_min_qs: Optional[int] = None
     critic_dropout_rate: float = 0.0
-    critic_layer_norm: bool = False
+    critic_layer_norm: bool = True
     tau: float = 0.005
     target_entropy: Optional[float] = None
     init_temperature: float = 1.0
