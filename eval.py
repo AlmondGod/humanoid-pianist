@@ -9,7 +9,7 @@ from tqdm import tqdm
 import pickle
 
 import architecture.sac as sac
-import utils.rl_dataclasses.specs as specs
+import rl_dataclasses.specs as specs
 
 # from robopianist import suite
 import dm_env_wrappers as wrappers

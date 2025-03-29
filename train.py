@@ -10,8 +10,8 @@ from tqdm import tqdm
 import pickle
 
 import architecture.sac as sac
-import utils.rl_dataclasses.specs as specs
-import utils.rl_dataclasses.replay as replay
+import rl_dataclasses.specs as specs
+import rl_dataclasses.replay as replay
 from architecture.hybrid_grpo import HybridGRPO  # Import only
 from architecture.qtopt import QTOpt, QTOptConfig  # Add QTOpt import
 

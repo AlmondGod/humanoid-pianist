@@ -1,17 +1,15 @@
 import jax
 import jax.numpy as jnp
-import optax
 from dataclasses import dataclass
-from typing import List, Optional, Any
+from typing import Optional, Any
 import pickle
 import time
 from pathlib import Path
 from tqdm import tqdm
 import numpy as np
 
-# Add these imports
 from architecture.sac import SAC, SACConfig
-from utils.rl_dataclasses.specs import EnvironmentSpec
+from rl_dataclasses.specs import EnvironmentSpec
 from robopianist import suite
 import dm_env_wrappers as wrappers
 import robopianist.wrappers as robopianist_wrappers

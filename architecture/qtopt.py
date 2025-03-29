@@ -14,8 +14,8 @@ from flax.training.train_state import TrainState
 
 from architecture.distributions import TanhNormal
 from architecture.networks import MLP, Ensemble, StateActionValue, subsample_ensemble
-from utils.rl_dataclasses.specs import EnvironmentSpec, zeros_like
-from utils.rl_dataclasses.replay import Transition
+from rl_dataclasses.specs import EnvironmentSpec, zeros_like
+from rl_dataclasses.replay import Transition
 
 LogDict = Dict[str, float]
 

@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 import sys
 sys.path.append('.')  # Add the root directory to path
 from architecture.sac import SAC, SACConfig
-from utils.rl_dataclasses.specs import EnvironmentSpec
+from rl_dataclasses.specs import EnvironmentSpec
 from robopianist import suite
 import dm_env_wrappers as wrappers
 import robopianist.wrappers as robopianist_wrappers
