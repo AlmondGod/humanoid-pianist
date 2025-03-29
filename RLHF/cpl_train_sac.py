@@ -7,6 +7,8 @@ import time
 from pathlib import Path
 from tqdm import tqdm
 import numpy as np
+import wandb
+from dataclasses import asdict
 
 from architecture.sac import SAC, SACConfig
 from rl_dataclasses.specs import EnvironmentSpec
@@ -264,7 +266,7 @@ class CPL_SAC(SAC):
     def update_cpl(self, preferred, non_preferred, config):
         """Update using CPL loss."""
         def cpl_loss_fn(actor_params):
-            # Calculate log probs for both segments
+            # Get log probabilities
             preferred_logprobs = jax.vmap(
                 lambda s, a: self.actor.apply_fn({"params": actor_params}, s).log_prob(a)
             )(preferred["states"], preferred["actions"])
@@ -273,20 +275,37 @@ class CPL_SAC(SAC):
                 lambda s, a: self.actor.apply_fn({"params": actor_params}, s).log_prob(a)
             )(non_preferred["states"], non_preferred["actions"])
             
-            # Apply discounting and compute sums
-            timesteps = jnp.arange(preferred_logprobs.shape[0])
-            discount = config.gamma ** timesteps
-            preferred_sum = jnp.sum(discount * preferred_logprobs)
-            non_preferred_sum = jnp.sum(discount * non_preferred_logprobs)
+            # Clip individual log probabilities before any operations
+            preferred_logprobs = jnp.clip(preferred_logprobs, -10.0, 10.0)
+            non_preferred_logprobs = jnp.clip(non_preferred_logprobs, -10.0, 10.0)
             
-            # Compute scores and loss
+            # Apply discounting with numerical stability
+            timesteps = jnp.arange(preferred_logprobs.shape[0])
+            discount = jnp.clip(config.gamma ** timesteps, 1e-6, 1.0)
+            
+            # Compute sums with reduced scale
+            scale = 0.1  # Reduce the scale of the sums
+            preferred_sum = scale * jnp.sum(discount * preferred_logprobs)
+            non_preferred_sum = scale * jnp.sum(discount * non_preferred_logprobs)
+            
+            # Apply temperature scaling with smaller alpha
             preferred_score = config.alpha * preferred_sum
             non_preferred_score = config.alpha * config.lambda_ * non_preferred_sum
             
+            print("\nDEBUG - Scores:")
+            print(f"Preferred score: {preferred_score}")
+            print(f"Non-preferred score: {non_preferred_score}")
+            print(f"exp(preferred_score): {jnp.exp(preferred_score)}")
+            print(f"exp(non_preferred_score): {jnp.exp(non_preferred_score)}")
+            
+            denominator = jnp.exp(preferred_score) + jnp.exp(non_preferred_score)
+            print(f"Denominator: {denominator}")
+            
             preference_loss = -jnp.log(
-                jnp.exp(preferred_score) / 
-                (jnp.exp(preferred_score) + jnp.exp(non_preferred_score))
+                jnp.exp(preferred_score) / denominator
             )
+            
+            print(f"Preference loss: {preference_loss}")
             
             # Compute conservative loss
             def compute_conservative_loss(states, actions):
@@ -314,7 +333,25 @@ class CPL_SAC(SAC):
             conservative_loss = (preferred_conservative + non_preferred_conservative) / 2.0
             total_loss = preference_loss + config.conservative_weight * conservative_loss
             
-            return total_loss, {"loss": total_loss}
+            # Add numerical stability by clipping extreme values
+            preferred_logprobs = jnp.clip(preferred_logprobs, -20.0, 20.0)
+            non_preferred_logprobs = jnp.clip(non_preferred_logprobs, -20.0, 20.0)
+            
+            # Use log-sum-exp trick for numerical stability
+            max_score = jnp.maximum(preferred_score, non_preferred_score)
+            stable_preference_loss = -(preferred_score - max_score - 
+                                   jnp.log(jnp.exp(preferred_score - max_score) + 
+                                         jnp.exp(non_preferred_score - max_score)))
+            
+            # Rest of the function remains the same...
+            return stable_preference_loss, {
+                "loss": stable_preference_loss,
+                "preference_loss": stable_preference_loss,
+                "preferred_logprobs_mean": jnp.mean(preferred_logprobs),
+                "non_preferred_logprobs_mean": jnp.mean(non_preferred_logprobs),
+                "preferred_score": preferred_score,
+                "non_preferred_score": non_preferred_score,
+            }
         
         try:
             # Get gradients with respect to the params
@@ -334,10 +371,21 @@ class CPL_SAC(SAC):
 
 def train_cpl(args: Args):
     """Train policy using CPL on preference data."""
-    # Create directories
+    # Initialize wandb
     timestamp = time.strftime('%Y-%m-%d-%H-%M-%S')
+    run_name = f"CPL-{Path(args.midi_file).stem}-{args.config.seed}-{timestamp}"
+    
+    wandb.init(
+        project="robopianist",
+        entity="almond-maj-projects",
+        name=run_name,
+        config=asdict(args),
+        mode="online"
+    )
+
+    # Create directories
     base_dir = Path(args.output_dir)
-    run_dir = base_dir / f"CPL-{Path(args.midi_file).stem}-{timestamp}"
+    run_dir = base_dir / run_name
     checkpoints_dir = run_dir / "checkpoints"
     eval_dir = run_dir / "eval"
     
@@ -369,8 +417,16 @@ def train_cpl(args: Args):
         pairwise_data = data["pairwise_data"]
 
     # Training loop
+    start_time = time.time()
+    total_steps = 0
+    
     for epoch in tqdm(range(args.config.num_epochs)):
         epoch_losses = []
+        epoch_metrics = {
+            "train/preference_loss": 0.0,
+            "train/conservative_loss": 0.0,
+            "train/total_loss": 0.0,
+        }
         
         # Training updates
         indices = jax.random.permutation(
@@ -378,27 +434,93 @@ def train_cpl(args: Args):
             len(pairwise_data)
         )
         
+        num_batches = 0
         for i in range(0, len(indices), args.config.batch_size):
             batch_indices = indices[i:i + args.config.batch_size]
             batch = [pairwise_data[idx] for idx in batch_indices]
             preferred, non_preferred = prepare_batch_data(batch)
+            
+            # Add debug prints for input data
+            print("\nDEBUG - Input Data:")
+            print(f"Preferred states shape: {preferred['states'].shape}")
+            print(f"Preferred states range: [{jnp.min(preferred['states'])}, {jnp.max(preferred['states'])}]")
+            print(f"Preferred actions range: [{jnp.min(preferred['actions'])}, {jnp.max(preferred['actions'])}]")
+            
             agent, info = agent.update_cpl(preferred, non_preferred, args.config)
+            
+            # Check if loss is NaN and print relevant info
+            if jnp.isnan(info["loss"]):
+                print("\nWARNING: NaN loss detected!")
+                print(f"Full info dict: {info}")
+            
+            # Track detailed metrics
+            epoch_metrics["train/preference_loss"] += info.get("preference_loss", 0.0)
+            epoch_metrics["train/conservative_loss"] += info.get("conservative_loss", 0.0)
+            epoch_metrics["train/total_loss"] += info["loss"]
             epoch_losses.append(info["loss"])
+            num_batches += 1
+            total_steps += 1
+
+            # Log training metrics periodically
+            if total_steps % 100 == 0:  # Adjust frequency as needed
+                # Calculate average metrics
+                for key in epoch_metrics:
+                    epoch_metrics[key] /= num_batches
+                
+                # Add FPS metric
+                epoch_metrics["train/fps"] = int(total_steps / (time.time() - start_time))
+                
+                # Log to wandb
+                wandb.log(epoch_metrics, step=total_steps)
+                
+                # Reset metrics
+                for key in epoch_metrics:
+                    epoch_metrics[key] = 0.0
+                num_batches = 0
 
         # Evaluation
         if (epoch + 1) % args.config.eval_interval == 0:
+            eval_metrics = {
+                "eval/episode_length": 0,
+                "eval/episode_return": 0,
+            }
+            
             for _ in range(args.config.eval_episodes):
                 timestep = eval_env.reset()
+                episode_return = 0
+                episode_length = 0
+                
                 while not timestep.last():
                     action = agent.eval_actions(timestep.observation)
                     timestep = eval_env.step(action)
+                    episode_return += timestep.reward
+                    episode_length += 1
+                
+                eval_metrics["eval/episode_length"] += episode_length
+                eval_metrics["eval/episode_return"] += episode_return
+            
+            # Average metrics over evaluation episodes
+            for key in eval_metrics:
+                eval_metrics[key] /= args.config.eval_episodes
+            
+            # Add video to wandb
+            if hasattr(eval_env, 'latest_filename'):
+                video = wandb.Video(
+                    str(eval_env.latest_filename),
+                    fps=4,
+                    format="mp4"
+                )
+                eval_metrics["eval/video"] = video
+            
+            # Log evaluation metrics
+            wandb.log(eval_metrics, step=total_steps)
             
             # Save checkpoint with video
             checkpoint = {
                 "params": agent.actor.params,
                 "config": args.config,
                 "epoch": epoch,
-                "video_path": str(eval_env.latest_filename)
+                "video_path": str(eval_env.latest_filename) if hasattr(eval_env, 'latest_filename') else None
             }
             checkpoint_path = checkpoints_dir / f"checkpoint_{epoch+1:06d}.pkl"
             with open(checkpoint_path, 'wb') as f:
@@ -406,6 +528,7 @@ def train_cpl(args: Args):
             
             print(f"\nEpoch {epoch+1}")
             print(f"Average loss: {np.mean(epoch_losses):.4f}")
+            print(f"Eval return: {eval_metrics['eval/episode_return']:.2f}")
             print(f"Saved checkpoint and video to {run_dir}")
 
     # Save final model
@@ -415,6 +538,8 @@ def train_cpl(args: Args):
     }
     with open(checkpoints_dir / "checkpoint_final.pkl", 'wb') as f:
         pickle.dump(final_checkpoint, f)
+    
+    wandb.finish()
 
 if __name__ == "__main__":
     import tyro
