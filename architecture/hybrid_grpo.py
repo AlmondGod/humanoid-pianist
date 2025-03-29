@@ -5,9 +5,7 @@ import numpy as np
 import time
 import threading
 import wandb  # Add wandb import
-from concurrent.futures import ThreadPoolExecutor
 from typing import Tuple, Dict, List, Any
-from dm_env import TimeStep
 
 class Actor(nn.Module):
     def __init__(self, state_dim: int, action_dim: int, hidden_dims: List[int], min_log_std: float = -2.0):

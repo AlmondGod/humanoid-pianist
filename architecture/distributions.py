@@ -1,12 +1,9 @@
 import functools
 from typing import Type, Callable
-
 import distrax
 import flax.linen as nn
 import jax.numpy as jnp
-
-
-from networks import default_init
+from architecture.networks import default_init
 
 
 class TanhMultivariateNormalDiag(distrax.Transformed):

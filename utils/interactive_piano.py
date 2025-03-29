@@ -7,29 +7,15 @@ shadow hands and an integrated Unitree G1 robot.
 """
 
 from pathlib import Path
-from typing import Optional, Tuple, Literal, List
+from typing import Optional, Tuple
 import tyro
 from dataclasses import dataclass
 import numpy as np
-import os
 import time
-from robot_descriptions import g1_mj_description
-from dm_control import mujoco
 from dm_control import mjcf
-from dm_control.composer.observation import observable
-from dm_control.composer import variation as base_variation
-
 from robopianist import suite
-from robopianist.music import midi_file
-from robopianist.models.arenas import stage
-from robopianist.suite.tasks import base
-from robopianist.suite.tasks import piano_with_shadow_hands
-
-# Import the RoboPianist viewer instead of dm_control viewer
 from robopianist.viewer import launch
-
 import robopianist.wrappers as robopianist_wrappers
-import dm_env_wrappers as wrappers
 from dm_control.composer import Entity
 
 class G1Entity(Entity):

@@ -10,8 +10,8 @@ from tqdm import tqdm
 import numpy as np
 
 # Add these imports
-from sac import SAC, SACConfig
-from specs import EnvironmentSpec
+from architecture.sac import SAC, SACConfig
+from utils.rl_dataclasses.specs import EnvironmentSpec
 from robopianist import suite
 import dm_env_wrappers as wrappers
 import robopianist.wrappers as robopianist_wrappers

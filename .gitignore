@@ -2,6 +2,7 @@ models/*
 videos/*
 wandb/*
 __pycache__
-RLHF/preference_data/*
-RLHF/cpl_trained_models/*
+rlhf/preference_data/*
+rlhf/cpl_trained_models/*
 eval/*
+played_songs/*

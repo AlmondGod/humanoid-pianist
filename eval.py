@@ -1,21 +1,15 @@
 from pathlib import Path
 from typing import Optional, Tuple, Literal
 import tyro
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 import time
 import random
 import numpy as np
 from tqdm import tqdm
 import pickle
-import os
 
-import sac
-import specs
-import replay
-from hybrid_grpo import HybridGRPO  # Import only
-from qtopt import QTOpt, QTOptConfig  # Add QTOpt import
-from dm_control import mjcf
-from dm_control.composer import Entity
+import architecture.sac as sac
+import utils.rl_dataclasses.specs as specs
 
 # from robopianist import suite
 import dm_env_wrappers as wrappers
@@ -29,7 +23,7 @@ from dm_control import composer
 from mujoco_utils import composer_utils
 
 from robopianist import music
-from piano_with_shadow_hands_and_g1 import PianoWithShadowHandsAndG1
+from wrappers.piano_with_shadow_hands_and_g1 import PianoWithShadowHandsAndG1
 
 # RoboPianist-repertoire-150.
 _BASE_REPERTOIRE_NAME = "RoboPianist-repertoire-150-{}-v0"

@@ -12,10 +12,10 @@ import optax
 from flax import struct
 from flax.training.train_state import TrainState
 
-from distributions import TanhNormal
-from networks import MLP, Ensemble, StateActionValue, subsample_ensemble
-from specs import EnvironmentSpec, zeros_like
-from replay import Transition
+from architecture.distributions import TanhNormal
+from architecture.networks import MLP, Ensemble, StateActionValue, subsample_ensemble
+from utils.rl_dataclasses.specs import EnvironmentSpec, zeros_like
+from utils.rl_dataclasses.replay import Transition
 
 LogDict = Dict[str, float]
 

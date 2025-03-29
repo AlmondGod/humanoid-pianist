@@ -1,34 +1,16 @@
-# TODO: i need preference data first, created by rolling out a pretrained policy. 
-
-# first, what data do i need to keep track of?
-
-# also, i need you to roll out the episodes and make recording for each episode, 
-# then allow me to reference them and add rankings after ive seen all the videos. 
-# i want to rank the videos and then the pairwse data is created by seeing 
-# which of the pair has a higher rating (1) and the lower one gets 0 in the pair. 
-
 import os
 import pickle
 import numpy as np
-import argparse
 import random
 from pathlib import Path
 import time
-import json
-from typing import List, Dict, Tuple, Optional
-import glob
+from typing import List, Optional
 import shutil
 from dataclasses import dataclass, field
-
 import sys
 sys.path.append('.')  # Add the root directory to path
-
-from sac import SAC, SACConfig
-from specs import EnvironmentSpec
-# Remove the non-existent import
-# from dm_env_wrappers import get_env
-
-# Import necessary modules for environment creation
+from architecture.sac import SAC, SACConfig
+from utils.rl_dataclasses.specs import EnvironmentSpec
 from robopianist import suite
 import dm_env_wrappers as wrappers
 import robopianist.wrappers as robopianist_wrappers

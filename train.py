@@ -9,11 +9,11 @@ import numpy as np
 from tqdm import tqdm
 import pickle
 
-import sac
-import specs
-import replay
-from hybrid_grpo import HybridGRPO  # Import only
-from qtopt import QTOpt, QTOptConfig  # Add QTOpt import
+import architecture.sac as sac
+import utils.rl_dataclasses.specs as specs
+import utils.rl_dataclasses.replay as replay
+from architecture.hybrid_grpo import HybridGRPO  # Import only
+from architecture.qtopt import QTOpt, QTOptConfig  # Add QTOpt import
 
 from robopianist import suite
 import dm_env_wrappers as wrappers

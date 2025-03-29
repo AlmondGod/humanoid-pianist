@@ -23,7 +23,7 @@ from robopianist.suite.tasks import base
 from robopianist.suite.tasks.piano_with_shadow_hands import PianoWithShadowHands
 from loop_rate_limiters import RateLimiter
 
-from g1_entity import G1Entity
+from wrappers.models.g1_entity import G1Entity
 
 # Distance thresholds for the shaping reward.
 _FINGER_CLOSE_ENOUGH_TO_KEY = 0.01
@@ -126,7 +126,8 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
                 euler=[0, 0, 3.14159]  # Rotate 180 degrees around Z axis (in radians)
             )
 
-            model_path = os.path.join(os.path.dirname(__file__), "unitree_g1/g1_modified.xml")
+            dir = "/".join(os.path.dirname(__file__).split("/")[:-1])
+            model_path = os.path.join(dir, "unitree_g1/g1_modified.xml")
 
             # Create and attach G1 entity
             g1_entity = G1Entity(model_path)
