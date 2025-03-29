@@ -62,6 +62,18 @@ def get_env(args, record_dir=None):
             height=480,  # Default height
             width=640,  # Default width
         )
+        # Add debug prints to track video recording
+        if hasattr(env, '_write_frames'):
+            original_write_frames = env._write_frames
+            def debug_write_frames():
+                print("\nAttempting to write video frames...")
+                try:
+                    original_write_frames()
+                    print("Successfully wrote video frames")
+                except Exception as e:
+                    print(f"Error writing video frames: {e}")
+            env._write_frames = debug_write_frames
+        
         env = wrappers.EpisodeStatisticsWrapper(
             environment=env, deque_size=1
         )
@@ -94,7 +106,7 @@ class Args:
     ])
     
     # Noise settings
-    noise_scales: List[float] = field(default_factory=lambda: [0.0, 0.05, 0.1, 0.15,0.2])  # Start with no noise
+    noise_scales: List[float] = field(default_factory=lambda: [0.0, 0.1])  # Start with no noise
     
     # Environment settings
     midi_file: str = "/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid"
@@ -148,9 +160,23 @@ class SegmentDataGenerator:
             dir_path.mkdir(parents=True, exist_ok=True)
         
         # Initialize environment
+        print(f"\nInitializing environment with video recording to: {self.video_dir}")  # Debug print
+        print(f"Video directory exists: {self.video_dir.exists()}")  # Debug print
+        print(f"Video directory is writable: {os.access(self.video_dir, os.W_OK)}")  # Debug print
         self.env = get_env(args, record_dir=self.video_dir)
+        print(f"Environment type after wrapping: {type(self.env)}")  # Debug print
+        print(f"Environment wrapper chain: {self._get_wrapper_chain(self.env)}")  # Debug print
         self.spec = EnvironmentSpec.make(self.env)
     
+    def _get_wrapper_chain(self, env):
+        """Helper to print the wrapper chain of an environment."""
+        chain = []
+        while hasattr(env, 'environment'):
+            chain.append(type(env).__name__)
+            env = env.environment
+        chain.append(type(env).__name__)
+        return ' -> '.join(chain)
+
     def load_agent(self, checkpoint_path):
         """Load agent from checkpoint."""
         with open(checkpoint_path, 'rb') as f:
@@ -174,7 +200,6 @@ class SegmentDataGenerator:
         return agent
 
     def generate_segments(self):
-        """Generate segments from multiple checkpoints with noise."""
         segments = []
         segment_info = []
         
@@ -185,9 +210,19 @@ class SegmentDataGenerator:
                 print(f"Generating segments for checkpoint {checkpoint_path} with noise scale {noise_scale}")
                 for _ in range(self.args.episodes_per_config):
                     timestep = self.env.reset()
+                    print(f"\nStarting new episode")  # Debug print
+                    print(f"Environment type: {type(self.env)}")  # Debug print
+                    if hasattr(self.env, '_record_dir'):
+                        print(f"Recording directory in env: {self.env._record_dir}")  # Debug print
                     current_segment = []
+                    episode_segments = []
+                    episode_segment_info = []
                     
-                    while not timestep.last():
+                    max_time = 15.0
+                    max_steps = int(max_time / self.args.control_timestep)
+                    total_steps = 0
+                    
+                    while not timestep.last() and total_steps < max_steps:
                         action = agent.eval_actions(timestep.observation)
                         if noise_scale > 0:
                             noise = np.random.normal(0, noise_scale, size=action.shape)
@@ -201,44 +236,77 @@ class SegmentDataGenerator:
                             "next_state": next_timestep.observation,
                         })
                         
+                        total_steps += 1
+                        
                         if len(current_segment) == self.args.steps_per_segment:
-                            segments.append(current_segment)
-                            segment_info.append({
-                                "checkpoint": checkpoint_path,
-                                "noise_scale": noise_scale,
-                                "start_time": len(segments) * self.args.segment_length
-                            })
+                            print(f"Current segment length: {len(current_segment)}")  # Debug print
+                            if (len(episode_segments) + 1) * self.args.segment_length <= max_time:
+                                episode_segments.append(current_segment)
+                                episode_segment_info.append({
+                                    "checkpoint": checkpoint_path,
+                                    "noise_scale": noise_scale,
+                                    "start_time": len(episode_segments) * self.args.segment_length
+                                })
+                                print(f"Episode segments count: {len(episode_segments)}")  # Debug print
                             current_segment = []
                         
                         timestep = next_timestep
                     
-                    # Handle partial segment at end of episode
-                    if len(current_segment) > 0:
-                        segments.append(current_segment)
-                        segment_info.append({
-                            "checkpoint": checkpoint_path,
-                            "noise_scale": noise_scale,
-                            "start_time": len(segments) * self.args.segment_length
-                        })
+                    print("\nEpisode complete, checking for video...")  # Debug print
+                    print(f"Total steps taken: {total_steps}")  # Debug print
+                    print(f"Episode ended naturally: {timestep.last()}")  # Debug print
+                    print(f"Max steps reached: {total_steps >= max_steps}")  # Debug print
                     
-                    # Save video
+                    # Explicitly write frames if we hit max_steps
+                    if total_steps >= max_steps and hasattr(self.env, '_write_frames'):
+                        print("Max steps reached - explicitly writing video frames...")
+                        try:
+                            self.env._write_frames()
+                            print("Successfully wrote video frames")
+                        except Exception as e:
+                            print(f"Error writing video frames: {e}")
+                    
+                    try:
+                        if hasattr(self.env, 'latest_filename'):
+                            print(f"Latest recorded video: {self.env.latest_filename}")  # Debug print
+                    except ValueError as e:
+                        print(f"Error checking latest_filename: {e}")  # Debug print
+                    
+                    # Save video and update segment info
                     video_files = sorted(self.video_dir.glob("*.mp4"), key=os.path.getctime)
+                    print(f"\nChecking video files in {self.video_dir}:")  # Debug print
+                    print(f"Found {len(video_files)} video files")  # Debug print
+                    if len(video_files) > 0:
+                        print(f"Latest video file: {video_files[-1]}")  # Debug print
+                    
                     if video_files:
                         latest_video = video_files[-1]
                         new_name = self.video_dir / f"episode_{len(segments):03d}_noise_{noise_scale:.2f}.mp4"
                         shutil.move(latest_video, new_name)
+                        print(f"Saved video: {new_name}")  # Debug print
                         
-                        for info in segment_info[-len(segments):]:
+                        # Add video path to all segments from this episode
+                        for info in episode_segment_info:
                             info["video_path"] = str(new_name)
+                        
+                        print(f"Episode segments before extend: {len(episode_segments)}")  # Debug print
+                        print(f"Main segments before extend: {len(segments)}")  # Debug print
+                        
+                        # Add segments and info to main lists
+                        segments.extend(episode_segments)
+                        segment_info.extend(episode_segment_info)
+                        
+                        print(f"Main segments after extend: {len(segments)}")  # Debug print
+                        print(f"Episode segments: {[len(s) for s in episode_segments]}")  # Debug print
+                        print(f"Segment info length: {len(segment_info)}")  # Debug print
+                    else:
+                        print("WARNING: No video files found - segments not saved!")  # Debug print
+                    
+                    print(f"End of episode - episode_segments: {len(episode_segments)}")  # Debug print
         
-        # Save all data
-        data = {
-            "segments": segments,
-            "segment_info": segment_info,
-            "args": self.args
-        }
-        with open(self.data_dir / "segments.pkl", "wb") as f:
-            pickle.dump(data, f)
+        # Print final counts
+        print(f"\nFinal segment count: {len(segments)}")
+        print(f"Final segment_info count: {len(segment_info)}")
         
         return segments, segment_info
     
@@ -316,3 +384,19 @@ if __name__ == "__main__":
     print("Generating pairwise data")
     # Generate pairwise data
     pairwise_data = generator.generate_pairwise_data(segments, segment_info, ratings)
+    
+    # Save the data
+    data = {
+        "pairwise_data": pairwise_data,
+        "segments": segments,
+        "segment_info": segment_info,
+        "ratings": ratings
+    }
+    
+    # Save to a file in the same directory as the videos
+    data_file = generator.data_dir / "preference_data.pkl"
+    print(f"\nSaving preference data to: {data_file}")
+    with open(data_file, 'wb') as f:
+        pickle.dump(data, f)
+    
+    print("Done!")
