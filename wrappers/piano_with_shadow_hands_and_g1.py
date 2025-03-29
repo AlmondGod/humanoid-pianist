@@ -127,7 +127,7 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
             )
 
             dir = "/".join(os.path.dirname(__file__).split("/")[:-1])
-            model_path = os.path.join(dir, "unitree_g1/g1_modified.xml")
+            model_path = os.path.join(dir, "assets/unitree_g1/g1_modified.xml")
 
             # Create and attach G1 entity
             g1_entity = G1Entity(model_path)

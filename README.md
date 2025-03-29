@@ -53,7 +53,7 @@ python eval.py \
 --midi-file <YOUR_MIDI_FILE_PATH>
 ```
 
-# Troubleshooting and Debugging
+### Troubleshooting and Tuning Training
 
 The current JAX is configured to run on Apple Silicon. Please adjust the JAX METAL lines according to your system.
 
