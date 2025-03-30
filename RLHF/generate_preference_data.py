@@ -78,38 +78,19 @@ def get_env(args, record_dir=None):
 @dataclass
 class Args:
     """Arguments for generating preference data."""
-    # Model checkpoints
-    checkpoints: List[str] = field(default_factory=lambda: [
-        "/Users/almondgod/Repositories/robopianist/robopianist-rl/models/CruelAngelsThesismiddle15s/SAC-/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid-42-2025-03-03-21-29-41/checkpoint_00920000.pkl",
-        "/Users/almondgod/Repositories/robopianist/robopianist-rl/models/CruelAngelsThesismiddle15s/SAC-/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid-42-2025-03-02-12-40-35/checkpoint_00320000.pkl",
-        "/Users/almondgod/Repositories/robopianist/robopianist-rl/models/CruelAngelsThesismiddle15s/SAC-/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid-42-2025-02-28-21-38-57/checkpoint_00640000.pkl",
-        "/Users/almondgod/Repositories/robopianist/robopianist-rl/models/CruelAngelsThesismiddle15s/SAC-/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid-42-2025-03-01-10-57-51/checkpoint_00480000.pkl",
-        "/Users/almondgod/Repositories/robopianist/robopianist-rl/models/CruelAngelsThesismiddle15s/SAC-/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid-42-2025-03-03-09-53-14/checkpoint_00560000.pkl"
-    ])
-    
-    # Noise settings
+    checkpoints: List[str] = None # Model checkpoints (use varied list)
     noise_scales: List[float] = field(default_factory=lambda: [0.0, 0.1])  # Start with no noise
-    
-    # Environment settings
-    midi_file: str = "/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid"
+    midi_file: str = None
     environment_name: Optional[str] = None
-    
-    # Data collection settings
     episodes_per_config: int = 1  # Number of episodes per checkpoint-noise combination
     seed: int = 42
     data_dir: str = "RLHF/preference_data"
     algorithm: str = "sac"
-    
-    # Optional settings
     rankings_file: Optional[str] = None
     generate_only: bool = False
-    
-    # Segment settings
     segment_length: float = 5.0  # Length of each segment in seconds
     control_timestep: float = 0.05  # Environment timestep
     steps_per_segment: int = field(init=False)
-    
-    # Add missing environment args
     n_steps_lookahead: int = 10
     trim_silence: bool = False
     gravity_compensation: bool = True

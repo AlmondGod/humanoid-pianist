@@ -33,11 +33,11 @@ class CPLTrainingConfig:
 @dataclass
 class Args:
     seed: int = 42
-    sac_checkpoint: str = "/Users/almondgod/Repositories/robopianist/robopianist-rl/models/CruelAngelsThesismiddle15s/SAC-/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid-42-2025-03-24-01-38-56/checkpoint_00800000.pkl"
-    preference_data: str = "/Users/almondgod/Repositories/robopianist/robopianist-rl/preference_data/2025-03-28-22-15-43/preference_data.pkl"
+    sac_checkpoint: str = None
+    preference_data: str = None
     output_dir: str = "cpl_trained_models"
     config: CPLTrainingConfig = CPLTrainingConfig()
-    midi_file: str = "/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid"
+    midi_file: str = None
     environment_name: Optional[str] = None
     n_steps_lookahead: int = 10
     trim_silence: bool = False

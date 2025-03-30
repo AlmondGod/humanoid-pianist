@@ -2,13 +2,13 @@
 
 ![PyPI Python Version][pypi-versions-badge]
 
-[pypi-versions-badge]: https://img.shields.io/pypi/pyversions/robopianist
+[pypi-versions-badge]: https://img.shields.io/pypi/pyversions/robopianist 
 
 ![Humanoid Robot Pianist](assets/Humanoid%20Robot%20Pianist.png)
 
 ## Installation
 
-First, install [robopianist](https://github.com/google-research/robopianist):
+First, install robopianist:
 
 ```bash
 bash <(curl -s https://raw.githubusercontent.com/google-research/robopianist/main/scripts/install_deps.sh) --no-soundfonts
@@ -24,7 +24,7 @@ From the same conda environment:
 1. Install [JAX](https://github.com/google/jax#installation)
 2. Run `pip install -r requirements.txt`
 
-## Usage
+## Getting Started
 
 To train an SAC policy to play Crossing Field's first 10s with the task parameters used in the robopianist paper:
 
@@ -51,13 +51,37 @@ WANDB_DIR=/tmp/robopianist/ MUJOCO_GL=glfw XLA_PYTHON_CLIENT_PREALLOCATE=false p
     --eval-interval 30000
 ```
 
-To evaluate a trained policy, run `python eval.py`
+To evaluate a trained policy, run:
 
 ```bash
 python scripts/eval.py \
---load_checkpoint <YOUR_MODEL_PATH> \
---midi-file <YOUR_MIDI_FILE_PATH>
+  --load_checkpoint <YOUR_MODEL_PATH> \
+  --midi-file "/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid"
 ```
+
+To generate preference data, run:
+```bash
+python rlhf/generate_preference_data.py \
+    --checkpoints \
+        "/path/to/checkpoint1.pkl" \
+        "/path/to/checkpoint2.pkl" \
+        "/path/to/checkpoint3.pkl" \
+        "/path/to/checkpoint4.pkl" \
+        "/path/to/checkpoint5.pkl" \
+    --midi-file "example_midis/Crossing Field 10s.mid"
+```
+
+To train a policy with CPL, run:
+
+```bash
+python scripts/cpl_train.py \
+    --sac_checkpoint "YOUR_SAC_CHECKPOINT.pkl"
+    --preference_data "YOUR_PREFERENCE_DATA.pkl"
+    --output_dir "cpl_trained_models"
+    --midi-file "example_midis/Crossing Field 10s.mid"
+```
+
+See [scripts/readme.md](scripts/readme.md) for information on other utility scripts `clip_midi.py`, `play_song.py`, and `interactive_piano.py`
 
 # Contrastive Preference Learning for Robotics
 [Original Paper](papers/Contrastive%20Preference%20Learning.pdf)
