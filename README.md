@@ -72,9 +72,9 @@ The current JAX is configured to run on Apple Silicon. Please adjust the JAX MET
 
 I encourage you not to use custom fingering, which can introduce errors and is not necessary when SAC is combined with RLHF finetuning.
 
-## Citing robopianist
 
-If you use this code, please cite our paper:
+
+### Robopianist and CPL Citations
 
 ```bibtex
 @article{zakka2023robopianist,
@@ -82,5 +82,15 @@ If you use this code, please cite our paper:
   title = {{RoboPianist: A Benchmark for High-Dimensional Robot Control}},
   journal = {arXiv preprint arXiv:2304.04150},
   year = {2023},
+}
+```
+
+```bibtex
+@InProceedings{hejna23contrastive,
+  title = {Contrastive Preference Learning: Learning From Human Feedback without RL},
+  author = {Hejna, Joey and Rafailov, Rafael and Sikchi, Harshit and Finn, Chelsea and Niekum, Scott and Knox, W. Bradley and Sadigh, Dorsa},
+  booktitle = {ArXiv preprint},
+  year = {2023},
+  url = {https://arxiv.org/abs/2310.13639}
 }
 ```
