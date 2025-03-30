@@ -18,7 +18,7 @@ from wrappers.humanoid_env import get_env
 
 @dataclass(frozen=True)
 class Args:
-    root_dir: str = "remember to use run.sh"
+    root_dir: str = "models"
     seed: int = 42
     max_steps: int = 1_000_000
     warmstart_steps: int = 5_000
@@ -54,7 +54,7 @@ class Args:
     camera_id: Optional[str | int] = "panning_camera"
     frame_stack: int = 1
     clip: bool = True
-    record_dir: Optional[Path] = Path("/tmp/robopianist/twinkle-twinkle-no-fingering/videos")
+    record_dir: Optional[Path] = Path("videos/twinkle-twinkle-no-fingering")
     record_every: int = 1
     record_resolution: Tuple[int, int] = (480, 640)
     action_reward_observation: bool = False
