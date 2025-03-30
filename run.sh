@@ -278,7 +278,7 @@ WANDB_DIR=/tmp/robopianist/ MUJOCO_GL=glfw XLA_PYTHON_CLIENT_PREALLOCATE=false p
 
 
 # SAC Droq Crossing Fields Complex 15s
-WANDB_DIR=/tmp/robopianist/ MUJOCO_GL=glfw XLA_PYTHON_CLIENT_PREALLOCATE=false python train.py \
+WANDB_DIR=/tmp/robopianist/ MUJOCO_GL=glfw XLA_PYTHON_CLIENT_PREALLOCATE=false python scripts/train.py \
     --root-dir /Users/almondgod/Repositories/robopianist/robopianist-rl/models/CrossingFieldsComplex15s \
     --warmstart-steps 5000 \
     --max-steps 5000000 \
@@ -302,7 +302,7 @@ WANDB_DIR=/tmp/robopianist/ MUJOCO_GL=glfw XLA_PYTHON_CLIENT_PREALLOCATE=false p
 
 
 # GUren no Yumiya 14s SAC Droq
-WANDB_DIR=/tmp/robopianist/ MUJOCO_GL=glfw XLA_PYTHON_CLIENT_PREALLOCATE=false python train.py \
+WANDB_DIR=/tmp/robopianist/ MUJOCO_GL=glfw XLA_PYTHON_CLIENT_PREALLOCATE=false python scripts/train.py \
     --root-dir /Users/almondgod/Repositories/robopianist/robopianist-rl/models/GurennoYumiya14s \
     --warmstart-steps 5000 \
     --max-steps 5000000 \

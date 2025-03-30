@@ -20,7 +20,7 @@ class TanhMultivariateNormalDiag(distrax.Transformed):
 class Normal(nn.Module):
     base_cls: Type[nn.Module] | Callable[..., nn.Module]
     action_dim: int
-    log_std_min: float = -20
+    log_std_min: float = -5
     log_std_max: float = 2
     state_dependent_std: bool = True
     squash_tanh: bool = False

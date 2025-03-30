@@ -487,7 +487,6 @@ class PianoWithShadowHandsAndG1(PianoWithShadowHands):
         for joint_name, angle in leg_joints.items():
             actuator = self._g1.mjcf_model.find('actuator', joint_name)
             if actuator is not None:
-                print(f"setting leg joint {joint_name} to {angle}")
                 physics.bind(actuator).ctrl = angle
             else:
                 raise ValueError(f"Actuator not found for joint: {joint_name}")

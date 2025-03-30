@@ -8,16 +8,12 @@ import random
 import numpy as np
 from tqdm import tqdm
 import pickle
-
 import architecture.sac as sac
 import rl_dataclasses.specs as specs
 import rl_dataclasses.replay as replay
 from architecture.hybrid_grpo import HybridGRPO  # Import only
 from architecture.qtopt import QTOpt, QTOptConfig  # Add QTOpt import
-
-from robopianist import suite
-import dm_env_wrappers as wrappers
-import robopianist.wrappers as robopianist_wrappers
+from wrappers.humanoid_env import get_env
 
 
 @dataclass(frozen=True)
@@ -39,7 +35,7 @@ class Args:
     tags: str = ""
     notes: str = ""
     mode: str = "online"
-    # environment_name: str = "RoboPianist-debug-TwinkleTwinkleRousseau-v0"
+    environment_name: str = "crossing-field-cut-10s"
     midi_file: Optional[Path] = None
     load_checkpoint: Optional[Path] = None  # Path to checkpoint file for resuming training
     n_steps_lookahead: int = 10
@@ -80,59 +76,6 @@ class Args:
 
 def prefix_dict(prefix: str, d: dict) -> dict:
     return {f"{prefix}/{k}": v for k, v in d.items()}
-
-
-def get_env(args: Args, record_dir: Optional[Path] = None):
-    env = suite.load(
-        environment_name="crossing-field-cut-10s",
-        # environment_name=args.environment_name,
-        midi_file=args.midi_file,
-        seed=args.seed,
-        stretch=args.stretch_factor,
-        shift=args.shift_factor,
-        task_kwargs=dict(
-            n_steps_lookahead=args.n_steps_lookahead,
-            trim_silence=args.trim_silence,
-            gravity_compensation=args.gravity_compensation,
-            reduced_action_space=args.reduced_action_space,
-            control_timestep=args.control_timestep,
-            wrong_press_termination=args.wrong_press_termination,
-            disable_fingering_reward=args.disable_fingering_reward,
-            disable_forearm_reward=args.disable_forearm_reward,
-            disable_colorization=args.disable_colorization,
-            disable_hand_collisions=args.disable_hand_collisions,
-            primitive_fingertip_collisions=args.primitive_fingertip_collisions,
-            change_color_on_activation=True,
-        ),
-    )
-    if record_dir is not None:
-        env = robopianist_wrappers.PianoSoundVideoWrapper(
-            environment=env,
-            record_dir=record_dir,
-            record_every=args.record_every,
-            camera_id=args.camera_id,
-            height=args.record_resolution[0],
-            width=args.record_resolution[1],
-        )
-        env = wrappers.EpisodeStatisticsWrapper(
-            environment=env, deque_size=args.record_every
-        )
-        env = robopianist_wrappers.MidiEvaluationWrapper(
-            environment=env, deque_size=args.record_every
-        )
-    else:
-        env = wrappers.EpisodeStatisticsWrapper(environment=env, deque_size=1)
-    if args.action_reward_observation:
-        env = wrappers.ObservationActionRewardWrapper(env)
-    env = wrappers.ConcatObservationWrapper(env)
-    if args.frame_stack > 1:
-        env = wrappers.FrameStackingWrapper(
-            env, num_frames=args.frame_stack, flatten=True
-        )
-    env = wrappers.CanonicalSpecWrapper(env, clip=args.clip)
-    env = wrappers.SinglePrecisionWrapper(env)
-    env = wrappers.DmControlWrapper(env)
-    return env
 
 
 def main(args: Args) -> None:

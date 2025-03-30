@@ -79,7 +79,6 @@ class G1Entity(composer.Entity):
         import os
         
         try:
-            print(f"Preprocessing G1 model XML file...")
             tree = ET.parse(model_path)
             root = tree.getroot()
             
@@ -124,7 +123,6 @@ class G1Entity(composer.Entity):
                 
             # Load the MJCF model here
             self._mjcf_root = mjcf.from_path(self._model_path)
-            print("Successfully loaded G1 model")
             
         except Exception as e:
             print(f"Error preprocessing G1 model XML: {e}")
