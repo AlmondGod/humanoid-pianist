@@ -46,9 +46,9 @@ WANDB_DIR=/tmp/robopianist/ MUJOCO_GL=glfw XLA_PYTHON_CLIENT_PREALLOCATE=false p
     --action-reward-observation \
     --primitive-fingertip-collisions \
     --eval-episodes 1 \
-    --camera-id "piano/back" \
     --tqdm-bar \
-    --eval-interval 30000
+    --eval-interval 30000 \
+    --disable_wandb
 ```
 
 To evaluate a trained policy, run:
@@ -63,11 +63,11 @@ To generate preference data, run:
 ```bash
 python rlhf/generate_preference_data.py \
     --checkpoints \
-        "/path/to/checkpoint1.pkl" \
-        "/path/to/checkpoint2.pkl" \
-        "/path/to/checkpoint3.pkl" \
-        "/path/to/checkpoint4.pkl" \
-        "/path/to/checkpoint5.pkl" \
+        <YOUR_PATH_TO_CHECKPOINT1.pkl> \
+        <YOUR_PATH_TO_CHECKPOINT2.pkl> \
+        <YOUR_PATH_TO_CHECKPOINT3.pkl> \
+        <YOUR_PATH_TO_CHECKPOINT4.pkl> \
+        <YOUR_PATH_TO_CHECKPOINT5.pkl> \
     --midi-file "example_midis/Crossing Field 10s.mid"
 ```
 
@@ -75,8 +75,8 @@ To train a policy with CPL, run:
 
 ```bash
 python scripts/cpl_train.py \
-    --sac_checkpoint "YOUR_SAC_CHECKPOINT.pkl"
-    --preference_data "YOUR_PREFERENCE_DATA.pkl"
+    --sac_checkpoint <YOUR_SAC_CHECKPOINT.pkl>
+    --preference_data <YOUR_PREFERENCE_DATA.pkl>
     --output_dir "cpl_trained_models"
     --midi-file "example_midis/Crossing Field 10s.mid"
 ```

@@ -30,7 +30,7 @@ class Args:
     tqdm_bar: bool = True
     replay_capacity: int = 1_000_000
     project: str = "robopianist"
-    entity: str = "almond-maj-projects"
+    entity: str = "projects"
     name: str = ""
     tags: str = ""
     notes: str = ""
@@ -50,13 +50,13 @@ class Args:
     disable_forearm_reward: bool = False
     disable_colorization: bool = False
     disable_hand_collisions: bool = False
-    primitive_fingertip_collisions: bool = False
+    primitive_fingertip_collisions: bool = False    
+    camera_id: Optional[str | int] = "panning_camera"
     frame_stack: int = 1
     clip: bool = True
     record_dir: Optional[Path] = Path("/tmp/robopianist/twinkle-twinkle-no-fingering/videos")
     record_every: int = 1
     record_resolution: Tuple[int, int] = (480, 640)
-    camera_id: Optional[str | int] = "piano/back"
     action_reward_observation: bool = False
     agent_config: sac.SACConfig = sac.SACConfig()
     algorithm: Literal["sac", "hybrid_grpo", "qtopt"] = "sac"  # Add QTOpt option
@@ -72,6 +72,7 @@ class Args:
     cem_iterations: int = 3  # Number of CEM iterations for action optimization
     cem_population_size: int = 64  # Population size for CEM
     cem_elite_fraction: float = 0.1  # Fraction of elites to keep in CEM
+    disable_wandb: bool = True
 
 
 def prefix_dict(prefix: str, d: dict) -> dict:
@@ -97,15 +98,16 @@ def main(args: Args) -> None:
     np.random.seed(args.seed)
     print(f"Set random seeds to: {args.seed}")
 
-    wandb.init(
-        project=args.project,
-        entity=args.entity or None,
-        tags=(args.tags.split(",") if args.tags else []),
-        notes=args.notes or None,
-        config=asdict(args),
-        mode=args.mode,
-        name=run_name,
-    )
+    if not args.disable_wandb:
+        wandb.init(
+            project=args.project,
+            entity=args.entity or None,
+            tags=(args.tags.split(",") if args.tags else []),
+            notes=args.notes or None,
+            config=asdict(args),
+            mode=args.mode,
+            name=run_name,
+        )
 
     env = get_env(args)
     eval_env = get_env(args, record_dir=experiment_dir / "eval")
@@ -230,7 +232,8 @@ def main(args: Args) -> None:
 
         # Reset episode.
         if timestep.last():
-            wandb.log(prefix_dict("train", env.get_statistics()), step=i)
+            if not args.disable_wandb:
+                wandb.log(prefix_dict("train", env.get_statistics()), step=i)
             timestep = env.reset()
             replay_buffer.insert(timestep, None)
 
@@ -239,9 +242,8 @@ def main(args: Args) -> None:
             if replay_buffer.is_ready():
                 transitions = replay_buffer.sample()
                 agent, metrics = agent.update(transitions)
-                if i % args.log_interval == 0:
+                if i % args.log_interval == 0 and not args.disable_wandb:
                     wandb.log(prefix_dict("train", metrics), step=i)
-                    # print(f"Training metrics: {metrics}")
 
         # Eval.
         if i % args.eval_interval == 0:
@@ -251,10 +253,10 @@ def main(args: Args) -> None:
                     timestep = eval_env.step(agent.eval_actions(timestep.observation))
             log_dict = prefix_dict("eval", eval_env.get_statistics())
             music_dict = prefix_dict("eval", eval_env.get_musical_metrics())
-            wandb.log(log_dict | music_dict, step=i)
-            video = wandb.Video(str(eval_env.latest_filename), fps=4, format="mp4")
-            wandb.log({"video": video, "global_step": i})
-            # eval_env.latest_filename.unlink()
+            if not args.disable_wandb:
+                wandb.log(log_dict | music_dict, step=i)
+                video = wandb.Video(str(eval_env.latest_filename), fps=4, format="mp4")
+                wandb.log({"video": video, "global_step": i})
 
             # Save checkpoint
             if args.algorithm == "hybrid_grpo":
@@ -285,7 +287,7 @@ def main(args: Args) -> None:
                 pickle.dump(checkpoint, f)
             print(f"Saved checkpoint to {checkpoint_path}")
 
-        if i % args.log_interval == 0:
+        if i % args.log_interval == 0 and not args.disable_wandb:
             wandb.log({"train/fps": int(i / (time.time() - start_time))}, step=i)
 
 

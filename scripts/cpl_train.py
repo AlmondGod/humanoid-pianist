@@ -126,7 +126,7 @@ def train_cpl(args: Args):
     
     wandb.init(
         project="robopianist",
-        entity="almond-maj-projects",
+        entity="projects",
         name=run_name,
         config=asdict(args),
         mode="online"

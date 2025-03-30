@@ -26,14 +26,14 @@ class Args:
     tqdm_bar: bool = True
     replay_capacity: int = 1_000_000
     project: str = "robopianist"
-    entity: str = "almond-maj-projects"
+    entity: str = "projects"
     name: str = ""
     tags: str = ""
     notes: str = ""
     mode: str = "online"
     environment_name: Optional[str] = None
-    midi_file: Optional[Path] = Path("/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid")
-    load_checkpoint: Optional[Path] = Path("/Users/almondgod/Repositories/robopianist/robopianist-rl/models/CruelAngelsThesismiddle15s/SAC-/Users/almondgod/Repositories/robopianist/midi_files_cut/Cruel Angel's Thesis Cut middle 15s.mid-42-2025-03-03-21-29-41/checkpoint_00640000.pkl") 
+    midi_file: Optional[Path] = None
+    load_checkpoint: Optional[Path] = None
     n_steps_lookahead: int = 10
     trim_silence: bool = False
     gravity_compensation: bool = True
@@ -55,7 +55,7 @@ class Args:
     action_reward_observation: bool = True
     agent_config: sac.SACConfig = sac.SACConfig()
     algorithm: Literal["sac"] = "sac"  # Add QTOpt option
-    unitree_g1_path: str = "/Users/almondgod/Repositories/robopianist/robopianist-rl/assets/unitree_g1/g1_modified.xml"
+    unitree_g1_path: str = "assets/unitree_g1/g1_modified.xml"
     unitree_position: Tuple[float, float, float] = (0.0, 0.4, 0.7)
 
 

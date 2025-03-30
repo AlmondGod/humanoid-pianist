@@ -84,7 +84,7 @@ class Args:
     camera_id: Optional[str | int] = "panning_camera"
     action_reward_observation: bool = True
     algorithm: Literal["sac"] = "sac"  # Add QTOpt option
-    unitree_g1_path: str = "/Users/almondgod/Repositories/robopianist/robopianist-rl/assets/unitree_g1/g1_modified.xml"
+    unitree_g1_path: str = "assets/unitree_g1/g1_modified.xml"
     unitree_position: Tuple[float, float, float] = (0.0, 0.4, 0.7)
     kwargs: Optional[Mapping[str, Any]] = None
 
