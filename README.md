@@ -1,8 +1,7 @@
 # Humanoid Robot Pianist
 
-![PyPI Python Version][pypi-versions-badge]
+![Python Version](https://img.shields.io/pypi/pyversions/robopianist )
 
-[pypi-versions-badge]: https://img.shields.io/pypi/pyversions/robopianist 
 
 ![Humanoid Robot Pianist](assets/Humanoid%20Robot%20Pianist.png)
 
