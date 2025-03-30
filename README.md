@@ -26,7 +26,7 @@ From the same conda environment:
 
 ## Usage
 
-We provide an example bash script to train an SAC policy to play Twinkle Twinkle Little Star with the task parameters used in the robopianist paper:
+To train an SAC policy to play Crossing Field's first 10s with the task parameters used in the robopianist paper:
 
 ```bash
 WANDB_DIR=/tmp/robopianist/ MUJOCO_GL=glfw XLA_PYTHON_CLIENT_PREALLOCATE=false python scripts/train.py \
